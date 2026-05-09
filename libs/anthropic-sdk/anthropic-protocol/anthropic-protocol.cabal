@@ -1,0 +1,94 @@
+cabal-version:   3.0
+name:            anthropic-protocol
+version:         0.1.0.0
+synopsis:        Protocol types and streaming for the Anthropic Messages API
+description:
+  Message protocol types (requests, responses, tools, thinking),
+  SSE streaming event types, and stream parsing/emission for the
+  Anthropic Messages API.
+
+license:         BSD-3-Clause
+license-file:    LICENSE
+author:          Anthropic API Haskell Contributors
+maintainer:      noreply@example.com
+category:        Web
+build-type:      Simple
+
+common warnings
+  ghc-options: -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+
+library
+  import:           warnings
+  default-language: Haskell2010
+  default-extensions:
+    DerivingStrategies
+    DeriveGeneric
+    GeneralizedNewtypeDeriving
+    OverloadedStrings
+    StrictData
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+    LambdaCase
+
+  hs-source-dirs:   src
+
+  exposed-modules:
+    Anthropic.Protocol
+    Anthropic.Protocol.Message
+    Anthropic.Protocol.Tool
+    Anthropic.Protocol.Thinking
+    Anthropic.Protocol.Batch
+    Anthropic.Protocol.Model
+    Anthropic.Protocol.TokenCount
+    Anthropic.Protocol.Stream
+    Anthropic.Protocol.Stream.Parser
+    Anthropic.Protocol.Stream.Accumulator
+    Anthropic.Protocol.Stream.Emitter
+
+  build-depends:
+    , base              >= 4.18 && < 5
+    , text              >= 2.0
+    , aeson             >= 2.1
+    , bytestring        >= 0.11
+    , containers        >= 0.6
+    , time              >= 1.12
+    , scientific        >= 0.3
+    , streaming         >= 0.2
+    , json-schema-combinators
+    , anthropic-types
+
+test-suite anthropic-protocol-test
+  import:           warnings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  other-modules:
+    Anthropic.Protocol.Generators
+    Anthropic.Protocol.ThinkingSpec
+    Anthropic.Protocol.ToolSpec
+    Anthropic.Protocol.MessageSpec
+    Anthropic.Protocol.BatchSpec
+    Anthropic.Protocol.ModelSpec
+    Anthropic.Protocol.TokenCountSpec
+    Anthropic.Protocol.StreamSpec
+    Anthropic.Protocol.Stream.AccumulatorSpec
+  default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+    OverloadedRecordDot
+    NoFieldSelectors
+    DuplicateRecordFields
+    LambdaCase
+    ScopedTypeVariables
+  ghc-options:      -threaded
+  build-tool-depends: hspec-discover:hspec-discover
+  build-depends:
+    , base                >= 4.18 && < 5
+    , anthropic-protocol
+    , anthropic-types
+    , aeson
+    , text
+    , hspec
+    , QuickCheck
+    , json-schema-combinators

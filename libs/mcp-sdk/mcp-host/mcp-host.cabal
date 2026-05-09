@@ -1,0 +1,52 @@
+cabal-version: 3.0
+name:          mcp-host
+version:       0.1.0.0
+synopsis:      Host layer for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Host
+
+  build-depends:
+    , base                 >= 4.16 && < 5
+    , mcp-client
+    , mcp-core
+    , mcp-session
+    , stm                  >= 2.5
+    , text                 >= 2.0
+    , unordered-containers >= 0.2
+
+test-suite mcp-host-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  build-depends:
+    , base     >= 4.16 && < 5
+    , hspec    >= 2.9
+    , mcp-host
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

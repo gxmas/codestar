@@ -1,0 +1,18 @@
+packages:
+  demo/
+  otel-api/
+  otel-sdk-common/
+  otel-semconv/
+  otel-proto/
+  otel-sdk-traces/
+  otel-sdk-metrics/
+  otel-sdk-logs/
+  otel-sdk-profiles/
+  otel-sdk-config/
+  otel-exporter-otlp-grpc/
+  otel-exporter-otlp-http/
+  otel-exporter-prometheus/
+  otel-exporter-console/
+  otel-exporter-inmemory/
+  otel-integration-tests/
+  otel-benchmarks/

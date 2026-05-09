@@ -1,0 +1,74 @@
+cabal-version: 3.0
+name:          mcp-core
+version:       0.1.0.0
+synopsis:      Core types and codec for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Types
+    Network.MCP.Types.Content
+    Network.MCP.Types.Capabilities
+    Network.MCP.Codec
+
+  build-depends:
+    , aeson                   >= 2.1
+    , base                    >= 4.16 && < 5
+    , base64-bytestring       >= 1.2
+    , bytestring              >= 0.11
+    , hashable                >= 1.3
+    , json-rpc-core
+    , json-schema-combinators
+    , text                    >= 2.0
+    , time                    >= 1.12
+    , unordered-containers    >= 0.2
+
+test-suite mcp-core-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  ghc-options:    -threaded
+
+  other-modules:
+    Network.MCP.Generators
+    Network.MCP.TypesSpec
+    Network.MCP.Types.ContentSpec
+    Network.MCP.Types.CapabilitiesSpec
+    Network.MCP.CodecSpec
+
+  build-depends:
+    , base                    >= 4.16 && < 5
+    , aeson
+    , bytestring
+    , hspec                   >= 2.9
+    , QuickCheck              >= 2.14
+    , mcp-core
+    , scientific
+    , text
+    , unordered-containers
+    , vector
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

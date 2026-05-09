@@ -1,0 +1,64 @@
+cabal-version: 3.0
+name:          mcp-transport-stdio
+version:       0.1.0.0
+synopsis:      Stdio transport for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Transport.Stdio
+
+  build-depends:
+    , aeson          >= 2.1
+    , async          >= 2.2
+    , base           >= 4.16 && < 5
+    , bytestring     >= 0.11
+    , mcp-core
+    , mcp-transport
+    , process        >= 1.6
+    , stm            >= 2.5
+    , streaming      >= 0.2
+    , text           >= 2.0
+
+test-suite mcp-transport-stdio-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  other-modules:  Network.MCP.Transport.StdioSpec
+  ghc-options:    -threaded
+  build-depends:
+    , aeson                >= 2.1
+    , base                 >= 4.16 && < 5
+    , hspec                >= 2.9
+    , mcp-core
+    , mcp-transport
+    , mcp-transport-stdio
+    , process              >= 1.6
+    , QuickCheck           >= 2.14
+    , streaming            >= 0.2
+    , text                 >= 2.0
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

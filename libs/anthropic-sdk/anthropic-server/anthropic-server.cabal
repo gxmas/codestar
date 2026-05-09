@@ -1,0 +1,92 @@
+cabal-version:   3.0
+name:            anthropic-server
+version:         0.1.0.0
+synopsis:        Server contract for the Anthropic Messages API
+description:
+  Validation, rate limiting, batch lifecycle, and service tier
+  routing for implementing Anthropic Messages API-conforming servers.
+  Framework-agnostic composable building blocks.
+
+license:         BSD-3-Clause
+license-file:    LICENSE
+author:          Anthropic API Haskell Contributors
+maintainer:      noreply@example.com
+category:        Web
+build-type:      Simple
+
+common warnings
+  ghc-options: -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+
+library
+  import:           warnings
+  default-language: Haskell2010
+  default-extensions:
+    DerivingStrategies
+    DeriveGeneric
+    GeneralizedNewtypeDeriving
+    OverloadedStrings
+    StrictData
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+    LambdaCase
+
+  hs-source-dirs:   src
+
+  exposed-modules:
+    Anthropic.Server
+    Anthropic.Server.Validation
+    Anthropic.Server.RateLimit
+    Anthropic.Server.Batch
+    Anthropic.Server.ServiceTier
+    Anthropic.Server.SSE
+
+  build-depends:
+    , base              >= 4.18 && < 5
+    , text              >= 2.0
+    , aeson             >= 2.1
+    , bytestring        >= 0.11
+    , containers        >= 0.6
+    , time              >= 1.12
+    , stm               >= 2.5
+    , streaming         >= 0.2
+    , anthropic-types
+    , anthropic-protocol
+
+test-suite anthropic-server-test
+  import:           warnings
+  type:             exitcode-stdio-1.0
+  default-language: Haskell2010
+  default-extensions:
+    DerivingStrategies
+    DeriveGeneric
+    GeneralizedNewtypeDeriving
+    OverloadedStrings
+    StrictData
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+    LambdaCase
+
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+
+  other-modules:
+    Anthropic.Server.ValidationSpec
+    Anthropic.Server.RateLimitSpec
+    Anthropic.Server.BatchSpec
+    Anthropic.Server.ServiceTierSpec
+
+  build-depends:
+    , base              >= 4.18 && < 5
+    , text              >= 2.0
+    , bytestring        >= 0.11
+    , hspec             >= 2.11
+    , hspec-discover    >= 2.11
+    , QuickCheck        >= 2.14
+    , anthropic-types
+    , anthropic-protocol
+    , anthropic-server
+
+  build-tool-depends:
+    hspec-discover:hspec-discover >= 2.11

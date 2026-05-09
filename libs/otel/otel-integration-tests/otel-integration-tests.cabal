@@ -1,0 +1,112 @@
+cabal-version: 3.0
+name:          otel-integration-tests
+version:       0.1.0.0
+synopsis:      Cross-signal integration tests for the OTel Haskell SDK
+description:   Integration tests verifying all three signals (traces, metrics, logs)
+               working together through the full SDK pipeline.
+license:       BSD-3-Clause
+author:        otel-haskell contributors
+maintainer:    otel-haskell contributors
+build-type:    Simple
+
+test-suite otel-integration-tests-test
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall -Werror -threaded
+  build-depends:
+    base           >=4.18 && <5,
+    text,
+    stm,
+    tasty,
+    tasty-hunit,
+    otel-api,
+    otel-sdk-common,
+    otel-sdk-traces,
+    otel-sdk-metrics,
+    otel-sdk-logs,
+    otel-exporter-inmemory
+
+test-suite otel-e2e-tests
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          E2E.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall -Werror -threaded
+  build-depends:
+    base           >=4.18 && <5,
+    text,
+    bytestring,
+    stm,
+    async,
+    network,
+    aeson,
+    tasty,
+    tasty-hunit,
+    proto-lens,
+    lens-family,
+    zlib,
+    otel-api,
+    otel-sdk-common,
+    otel-sdk-traces,
+    otel-sdk-metrics,
+    otel-sdk-logs,
+    otel-exporter-inmemory,
+    otel-exporter-otlp-grpc,
+    otel-exporter-otlp-http,
+    otel-proto,
+    http2,
+    http-types,
+    http-semantics
+
+test-suite otel-config-tests
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Config.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall -Werror -threaded
+  build-depends:
+    base           >=4.18 && <5,
+    text,
+    stm,
+    async,
+    tasty,
+    tasty-hunit,
+    otel-api,
+    otel-sdk-common,
+    otel-sdk-traces,
+    otel-sdk-metrics,
+    otel-sdk-logs,
+    otel-sdk-config,
+    otel-exporter-inmemory

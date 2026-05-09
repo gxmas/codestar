@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build:
+    name: GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ghc: "9.8.4"
+            cabal: "3.10"
+          - ghc: "9.10.3"
+            cabal: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gxmas/json-schema-combinators
+          path: _deps/json-schema-combinators
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gxmas/core-libs
+          path: _deps/core-libs
+          sparse-checkout: telemetry-core
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write CI cabal.project
+        run: |
+          cat > cabal.project << 'EOF'
+          packages:
+            anthropic-types
+            anthropic-protocol
+            anthropic-client
+            anthropic-server
+            anthropic-tools-common
+            _deps/json-schema-combinators
+            _deps/core-libs/telemetry-core
+          EOF
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ matrix.cabal }}
+
+      - name: Configure
+        run: cabal configure --enable-tests
+
+      - name: Freeze
+        run: cabal freeze
+
+      - name: Cache cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
+          restore-keys: ${{ runner.os }}-ghc${{ matrix.ghc }}-
+
+      - name: Build
+        run: cabal build all
+
+      - name: Test
+        run: cabal test --test-show-details=direct all
+
+      - name: Haddock
+        run: cabal haddock all

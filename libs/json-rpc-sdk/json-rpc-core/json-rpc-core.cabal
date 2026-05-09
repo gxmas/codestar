@@ -1,0 +1,67 @@
+cabal-version:   3.0
+name:            json-rpc-core
+version:         0.1.0.0
+synopsis:        JSON-RPC 2.0 core types and codec
+description:
+  Core types, JSON codec, and transport interface for the JSON-RPC 2.0
+  protocol. This package provides the shared vocabulary used by
+  @json-rpc-server@ and @json-rpc-client@.
+
+license:         BSD-3-Clause
+author:          Your Name
+maintainer:      you@example.com
+category:        Network
+build-type:      Simple
+
+library
+  default-language: GHC2021
+  hs-source-dirs:   src
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+  exposed-modules:
+    Network.JsonRpc.Types
+    Network.JsonRpc.Types.Internal
+    Network.JsonRpc.Codec
+    Network.JsonRpc.Codec.Internal
+    Network.JsonRpc.Transport
+
+  build-depends:
+      base                  >= 4.16  && < 4.22
+    , aeson                 >= 2.0   && < 2.3
+    , bytestring            >= 0.11  && < 0.13
+    , hashable              >= 1.3   && < 1.6
+    , scientific            >= 0.3   && < 0.4
+    , text                  >= 2.0   && < 2.2
+    , unordered-containers  >= 0.2.16 && < 0.3
+    , vector                >= 0.12  && < 0.14
+
+test-suite json-rpc-core-test
+  type:             exitcode-stdio-1.0
+  default-language: GHC2021
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  ghc-options:      -Wall -threaded -rtsopts -with-rtsopts=-N
+
+  other-modules:
+    Test.Network.JsonRpc.Generators
+    Test.Network.JsonRpc.TypesSpec
+    Test.Network.JsonRpc.CodecSpec
+    Test.Network.JsonRpc.TransportSpec
+
+  build-depends:
+      base
+    , json-rpc-core
+    , aeson
+    , bytestring
+    , hashable
+    , hspec                >= 2.9   && < 2.12
+    , QuickCheck           >= 2.14  && < 2.16
+    , scientific
+    , text
+    , unordered-containers
+    , vector
+
+  build-tool-depends:
+    hspec-discover:hspec-discover

@@ -1,0 +1,42 @@
+cabal-version: 3.0
+name:          openai-sdk
+version:       0.1.0.0
+synopsis:      OpenAI-compatible API client
+description:
+  HTTP client for the OpenAI chat completions API.
+  Configurable base URL supports OpenAI, xAI, Groq, Mistral,
+  and any other OpenAI-compatible provider.
+license:       NONE
+build-type:    Simple
+
+common shared
+  default-language: GHC2021
+  default-extensions:
+    OverloadedStrings
+    DerivingStrategies
+    DeriveAnyClass
+    DeriveGeneric
+    DuplicateRecordFields
+    OverloadedRecordDot
+    StrictData
+    LambdaCase
+  ghc-options: -Wall -Wunused-packages
+
+library
+  import:         shared
+  hs-source-dirs: src
+  exposed-modules:
+    OpenAI
+    OpenAI.Client
+    OpenAI.Types
+  other-modules:
+    OpenAI.Internal.Http
+    OpenAI.Internal.SSE
+  build-depends:
+      base           >= 4.18 && < 5
+    , aeson          >= 2.1
+    , bytestring     >= 0.11
+    , http-client    >= 0.7
+    , http-client-tls >= 0.3
+    , http-types     >= 0.12
+    , text           >= 2.0

@@ -1,0 +1,139 @@
+# CodeStar default configuration
+#
+# Copy this file to one of:
+#   $XDG_CONFIG_HOME/codestar/settings.toml   (global, user-level)
+#   <workspace>/.codestar/settings.toml       (project-level, overrides global)
+#
+# All fields are optional — omitted fields use the defaults shown here.
+# Precedence (lowest to highest): defaults → global → project → env vars → CLI flags
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+[models]
+architect  = { name = "claude-sonnet-4-20250514",  temperature = 0.7, max_tokens = 8192 }
+coder      = { name = "claude-sonnet-4-20250514",  temperature = 0.0, max_tokens = 8192 }
+validator  = { name = "claude-sonnet-4-20250514",  temperature = 0.0, max_tokens = 4096 }
+summarizer = { name = "claude-haiku-3-5-20241022", temperature = 0.0, max_tokens = 4096 }
+
+# ---------------------------------------------------------------------------
+# Server (WebSocket mode)
+# ---------------------------------------------------------------------------
+
+[server]
+port = 8080
+host = "127.0.0.1"
+http_timeout = 3600                  # seconds
+graceful_shutdown_timeout = 30       # seconds
+ping_interval = 30                   # seconds
+
+# ---------------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------------
+
+[telemetry]
+mode = "otlp"                        # otlp | stderr | off
+service_name = "codestar"
+# Uncomment to export traces to a local OTLP collector (e.g. Jaeger).
+# Use 4318 for HTTP/protobuf (recommended) or 4317 for gRPC.
+# endpoint = "http://localhost:4318"
+log_to_stderr = false
+metrics_enabled = true
+metrics_bind_host = "127.0.0.1"      # bind host for /metrics (use "0.0.0.0" for container scraping)
+metrics_port = 9100                  # Prometheus scrape port
+
+# ---------------------------------------------------------------------------
+# Context window
+# ---------------------------------------------------------------------------
+
+[context]
+max_tokens = 200000
+repo_map_reserve = 4096
+memory_reserve = 2048
+compaction_reserve = 1024
+response_reserve = 8192
+
+# ---------------------------------------------------------------------------
+# Compaction
+# ---------------------------------------------------------------------------
+
+[compaction]
+trigger_fraction = 0.85              # compact when context is this fraction full
+max_context_tokens = 200000
+
+# ---------------------------------------------------------------------------
+# Shell tool
+# ---------------------------------------------------------------------------
+
+[shell]
+default_timeout = 30000             # ms
+max_concurrent = 64
+output_truncation = 50000           # chars
+
+# ---------------------------------------------------------------------------
+# Sessions (server mode)
+# ---------------------------------------------------------------------------
+
+[session]
+max_per_user = 3
+inactivity_timeout = 1800           # seconds
+
+# ---------------------------------------------------------------------------
+# Guardrails
+# ---------------------------------------------------------------------------
+
+[guardrails]
+deny_list = ["shell"]
+allow_list = ["read", "glob", "grep", "todo_read", "todo_write"]
+secret_patterns = ["password", "secret", "api_key", "token", "private_key"]
+
+# ---------------------------------------------------------------------------
+# Budget
+# ---------------------------------------------------------------------------
+
+[budget]
+max_steps = 50
+# session_token_max = 1000000       # uncomment to set a session token limit
+# daily_token_max = 10000000        # uncomment to set a daily token limit
+
+# ---------------------------------------------------------------------------
+# Repo map
+# ---------------------------------------------------------------------------
+
+[repomap]
+rebuild_interval_ms = 2000
+max_tokens = 4096
+batch_size = 10
+
+# ---------------------------------------------------------------------------
+# Memory
+# ---------------------------------------------------------------------------
+
+[memory]
+enabled = true
+max_entries = 100
+auto_discover = true
+
+# ---------------------------------------------------------------------------
+# Index strategy
+# ---------------------------------------------------------------------------
+
+# strategy = "repomap"              # none | repomap | semantic
+
+# ---------------------------------------------------------------------------
+# Planning mode
+# ---------------------------------------------------------------------------
+
+# planning_mode = "none"            # none | list | dag
+
+# ---------------------------------------------------------------------------
+# MCP endpoints
+# ---------------------------------------------------------------------------
+
+# [[mcp]]
+# name = "my-tool"
+# command = "python"
+# args = ["/path/to/tool.py"]
+# transport = "stdio"
+# env = { TOOL_KEY = "value" }

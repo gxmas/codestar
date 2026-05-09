@@ -1,0 +1,30 @@
+cabal-version:   3.0
+name:            json-rpc
+version:         0.1.0.0
+synopsis:        JSON-RPC 2.0 library for Haskell (convenience re-exports)
+description:
+  Convenience package that re-exports the full public API from
+  @json-rpc-core@, @json-rpc-server@, and @json-rpc-client@.
+  Import @Network.JsonRpc@ and get everything.
+
+license:         BSD-3-Clause
+author:          Your Name
+maintainer:      you@example.com
+category:        Network
+build-type:      Simple
+
+library
+  default-language: GHC2021
+  hs-source-dirs:   src
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+  exposed-modules:
+    Network.JsonRpc
+
+  build-depends:
+      base             >= 4.16  && < 4.22
+    , json-rpc-core
+    , json-rpc-server
+    , json-rpc-client

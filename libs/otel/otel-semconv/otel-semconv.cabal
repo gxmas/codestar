@@ -1,0 +1,69 @@
+cabal-version: 3.0
+name:          otel-semconv
+version:       0.1.0.0
+synopsis:      OpenTelemetry semantic conventions
+description:
+  Haskell constants for the OpenTelemetry semantic conventions (v1.27.0).
+  Provides typed attribute keys for HTTP, database, RPC, messaging, and
+  resource semantics.
+
+license:       BSD-3-Clause
+homepage:      https://github.com/noel-geoff/otel-haskell
+bug-reports:   https://github.com/noel-geoff/otel-haskell/issues
+author:        Geoffrey Noel <noel.geoff@gmail.com>
+maintainer:    Geoffrey Noel <noel.geoff@gmail.com>
+category:      Network
+build-type:    Simple
+extra-doc-files: CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/noel-geoff/otel-haskell
+
+library
+  hs-source-dirs: src
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall
+  build-depends:
+    base >= 4.18 && < 4.22,
+    text >= 2.1 && < 2.2,
+    otel-api >= 0.1 && < 0.2
+  exposed-modules:
+    OTel.SemConv
+    OTel.SemConv.HTTP
+    OTel.SemConv.DB
+    OTel.SemConv.RPC
+    OTel.SemConv.Messaging
+    OTel.SemConv.Resource
+
+test-suite otel-semconv-test
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall
+  build-depends:
+    otel-semconv,
+    base >= 4.18 && < 4.22,
+    tasty >= 1.5 && < 1.6,
+    tasty-quickcheck >= 0.11 && < 0.12

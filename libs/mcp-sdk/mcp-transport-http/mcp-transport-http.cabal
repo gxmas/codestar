@@ -1,0 +1,68 @@
+cabal-version: 3.0
+name:          mcp-transport-http
+version:       0.1.0.0
+synopsis:      HTTP/SSE transport for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Transport.Http
+
+  build-depends:
+    , aeson             >= 2.1
+    , async             >= 2.2
+    , base              >= 4.16 && < 5
+    , bytestring        >= 0.11
+    , case-insensitive  >= 1.2
+    , http-client       >= 0.7
+    , http-client-tls   >= 0.3
+    , http-types        >= 0.12
+    , mcp-core
+    , mcp-transport
+    , stm               >= 2.5
+    , streaming         >= 0.2
+    , text              >= 2.0
+
+test-suite mcp-transport-http-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  other-modules:  Network.MCP.Transport.HttpSpec
+  ghc-options:    -threaded
+  build-depends:
+    , base                 >= 4.16 && < 5
+    , bytestring           >= 0.11
+    , hspec                >= 2.9
+    , http-types           >= 0.12
+    , mcp-core
+    , mcp-transport
+    , mcp-transport-http
+    , QuickCheck           >= 2.14
+    , text                 >= 2.0
+    , wai                  >= 3.2
+    , warp                 >= 3.3
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

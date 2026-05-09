@@ -1,0 +1,36 @@
+packages:
+  apps
+
+  libs/anthropic-sdk/anthropic-types
+  libs/anthropic-sdk/anthropic-protocol
+  libs/anthropic-sdk/anthropic-client
+  libs/anthropic-sdk/anthropic-server
+  libs/anthropic-sdk/anthropic-tools-common
+
+  libs/json-rpc-sdk/json-rpc-core
+  libs/json-rpc-sdk/json-rpc-client
+  libs/json-rpc-sdk/json-rpc-server
+  libs/json-rpc-sdk/json-rpc
+
+  libs/json-schema-combinators
+
+  libs/mcp-sdk/mcp-core
+  libs/mcp-sdk/mcp-transport
+  libs/mcp-sdk/mcp-transport-stdio
+  libs/mcp-sdk/mcp-transport-http
+  libs/mcp-sdk/mcp-session
+  libs/mcp-sdk/mcp-server
+  libs/mcp-sdk/mcp-client
+  libs/mcp-sdk/mcp-host
+  libs/mcp-sdk/mcp-tasks
+
+  libs/cache-core
+  libs/config-core
+  libs/resilience
+  libs/storage-core
+  libs/streaming-core
+  libs/telemetry-core
+
+  libs/tree-sitter
+  libs/openai-sdk
+  libs/ollama-sdk

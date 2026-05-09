@@ -1,0 +1,65 @@
+cabal-version:   3.0
+name:            json-schema-combinators
+version:         0.1.0.0
+synopsis:        Type-safe JSON Schema (draft 2020-12) combinators
+description:
+  Type-safe combinators for constructing JSON Schema
+  (draft 2020-12) documents in Haskell. Provides primitive and composite
+  schema constructors, composable constraint and annotation modifiers,
+  and lossless round-trip serialization via aeson.
+
+license:         MIT
+license-file:    LICENSE
+author:          Geoffrey Noel
+maintainer:      noel.geoff@gmail.com
+copyright:       2026 Geoffrey Noel
+category:        Data, JSON
+stability:       experimental
+build-type:      Simple
+tested-with:     GHC == 9.6.7, GHC == 9.8.4, GHC == 9.10.1
+extra-source-files: LICENSE
+
+library
+  exposed-modules:
+    Data.JsonSchema
+    Data.JsonSchema.Combinators
+    Data.JsonSchema.OrderedMap
+    Data.JsonSchema.Schema
+    Data.JsonSchema.Schema.Internal
+    Data.JsonSchema.Serialization
+
+  build-depends:
+    , aeson        >=2.0   && <2.3
+    , base         >=4.16  && <5
+    , containers   >=0.6   && <0.8
+    , scientific   >=0.3   && <0.4
+    , text         >=2.0   && <2.2
+
+  hs-source-dirs:   src
+  default-language: Haskell2010
+  ghc-options:      -Wall -Wcompat
+
+test-suite json-schema-combinators-test
+  type:             exitcode-stdio-1.0
+  main-is:          Spec.hs
+  other-modules:
+    Data.JsonSchema.CombinatorsSpec
+    Data.JsonSchema.IntegrationSpec
+    Data.JsonSchema.OrderedMapSpec
+    Data.JsonSchema.SchemaSpec
+    Data.JsonSchema.SerializationSpec
+
+  build-depends:
+    , aeson
+    , base                 >=4.16 && <5
+    , containers
+    , hspec                >=2.0  && <2.12
+    , json-schema-combinators
+    , QuickCheck           >=2.14 && <2.16
+    , scientific
+    , text
+    , vector
+
+  hs-source-dirs:   test
+  default-language: Haskell2010
+  ghc-options:      -Wall -Wcompat

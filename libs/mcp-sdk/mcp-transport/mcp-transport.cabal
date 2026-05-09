@@ -1,0 +1,60 @@
+cabal-version: 3.0
+name:          mcp-transport
+version:       0.1.0.0
+synopsis:      Transport typeclass for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Transport
+
+  build-depends:
+    , base        >= 4.16 && < 5
+    , mcp-core
+    , streaming   >= 0.2
+    , text        >= 2.0
+
+test-suite mcp-transport-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  ghc-options:    -threaded
+
+  other-modules:
+    Network.MCP.TransportSpec
+
+  build-depends:
+    , aeson
+    , base           >= 4.16 && < 5
+    , hspec          >= 2.9
+    , QuickCheck     >= 2.14
+    , mcp-core
+    , mcp-transport
+    , stm
+    , streaming
+    , text
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

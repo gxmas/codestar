@@ -1,0 +1,26 @@
+# Cabal
+dist/
+dist-newstyle/
+cabal.project.local
+cabal.project.local~
+.cabal-sandbox/
+cabal.sandbox.config
+*.cabal.orig
+
+# Stack
+.stack-work/
+stack.yaml.lock
+
+# GHC
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+
+# HLS
+.hie/
+hie.yaml
+
+# OS
+.DS_Store
+Thumbs.db

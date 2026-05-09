@@ -1,0 +1,278 @@
+cabal-version: 3.0
+name:          codestar
+version:       0.1.0.0
+synopsis:      AI coding agent
+license:       NONE
+build-type:    Simple
+data-dir:      queries
+data-files:    *.scm
+
+common shared
+  default-language: GHC2021
+  default-extensions:
+    OverloadedStrings
+    DeriveGeneric
+    DerivingStrategies
+    DeriveAnyClass
+    DuplicateRecordFields
+    OverloadedRecordDot
+    StrictData
+    LambdaCase
+    TypeApplications
+  ghc-options: -Wall -Wunused-packages -threaded
+
+library
+  import:         shared
+  hs-source-dirs: src
+  exposed-modules:
+    CodeStar.Types
+    CodeStar.Config
+    CodeStar.Config.Types
+    CodeStar.Config.Defaults
+    CodeStar.Config.Validate
+    CodeStar.Config.Env
+    CodeStar.Config.Toml
+    CodeStar.Config.Json
+    CodeStar.Config.Load
+    CodeStar.Config.Migrate
+    CodeStar.Config.Paths
+    CodeStar.Telemetry
+    CodeStar.LLM.Base
+    CodeStar.LLM.Anthropic
+    CodeStar.LLM.OpenAI
+    CodeStar.LLM.Ollama
+    CodeStar.Storage
+    CodeStar.TreeSitter
+    CodeStar.TreeSitter.Grammars
+    CodeStar.Tools.Registry
+    CodeStar.Tools.Read
+    CodeStar.Tools.Write
+    CodeStar.Tools.Edit
+    CodeStar.Tools.Glob
+    CodeStar.Tools.Grep
+    CodeStar.Tools.Git
+    CodeStar.Tools.Shell
+    CodeStar.Tools.Tests
+    CodeStar.Tools.TodoList
+    CodeStar.Tools.MCP
+    CodeStar.RepoMap.Graph
+    CodeStar.RepoMap.Render
+    CodeStar.RepoMap.Cache
+    CodeStar.RepoMap.CacheGc
+    CodeStar.RepoMap.Worker
+    CodeStar.Localization
+    CodeStar.SemanticSearch
+    CodeStar.Context
+    CodeStar.History
+    CodeStar.Compaction
+    CodeStar.Planning
+    CodeStar.PlanExecution
+    CodeStar.Verification
+    CodeStar.Memory
+    CodeStar.Signal
+    CodeStar.Guardrails
+    CodeStar.Permissions
+    CodeStar.AgentLoop
+    CodeStar.Transport.Types
+    CodeStar.Transport.JsonRpc
+    CodeStar.Transport.WebSocket
+    CodeStar.Platform.SessionManager
+    CodeStar.Platform.CostTracker
+    CodeStar.Platform.Sandbox
+    CodeStar.Platform.Auth
+  other-modules:
+    CodeStar.RepoMap.Graph.Extract
+    CodeStar.RepoMap.Graph.Extract.Haskell
+    CodeStar.RepoMap.Graph.Extract.Python
+    CodeStar.RepoMap.Graph.Extract.TypeScript
+    CodeStar.RepoMap.Graph.Extract.Types
+  build-depends:
+      base >= 4.18 && < 5
+    , aeson
+    , anthropic-client
+    , anthropic-protocol
+    , anthropic-types
+    , async
+    , bytestring
+    , containers
+    , http-client
+    , http-client-tls
+    , http-types
+    , directory
+    , filepattern
+    , filepath
+    , hashable
+    , json-rpc
+    , json-schema-combinators
+    , mcp-client
+    , mcp-core
+    , mcp-session
+    , mcp-transport
+    , mcp-transport-http
+    , mcp-transport-stdio
+    , openai-sdk
+    , optparse-applicative
+    , resilience
+    , storage-core
+    , telemetry-core
+    , toml-reader >= 0.3
+    , typed-process
+    , stm
+    , text
+    , time
+    , tree-sitter
+    , vector
+    , websockets
+
+executable codestar-cli
+  import:         shared
+  hs-source-dirs: codestar-cli
+  main-is:        CLI.hs
+  build-depends:
+      base
+    , aeson
+    , bytestring
+    , codestar
+    , containers
+    , filepath
+    , haskeline
+    , resilience
+    , text
+
+executable repo-map
+  import:         shared
+  hs-source-dirs: repo-map
+  main-is:        Main.hs
+  build-depends:
+      base
+    , bytestring
+    , codestar
+    , containers
+    , directory
+    , filepath
+    , text
+    , time
+    , tree-sitter
+
+executable codestar-server
+  import:         shared
+  hs-source-dirs: codestar-serve
+  main-is:        Server.hs
+  build-depends:
+      async
+    , base
+    , bytestring
+    , codestar
+    , directory
+    , filepath
+    , stm
+    , text
+    , wai
+    , wai-websockets
+    , warp
+    , websockets
+
+executable codestar-client
+  import:         shared
+  hs-source-dirs: codestar-client
+  main-is:        Client.hs
+  build-depends:
+      aeson
+    , async
+    , base
+    , bytestring
+    , codestar
+    , haskeline
+    , text
+    , websockets
+
+test-suite codestar-test
+  import:         shared
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  other-modules:
+    CodeStar.AgentLoopSpec
+    CodeStar.CompactionSpec
+    CodeStar.Config.DefaultsSpec
+    CodeStar.Config.EnvSpec
+    CodeStar.Config.Gen
+    CodeStar.Config.JsonSpec
+    CodeStar.Config.LoadSpec
+    CodeStar.Config.MigrateSpec
+    CodeStar.Config.PartialSpec
+    CodeStar.Config.PathsSpec
+    CodeStar.Config.TomlSpec
+    CodeStar.Config.TypesSpec
+    CodeStar.Config.ValidateSpec
+    CodeStar.ConfigSpec
+    CodeStar.ContextSpec
+    CodeStar.GuardrailsSpec
+    CodeStar.HistorySpec
+    CodeStar.LLM.AnthropicSpec
+    CodeStar.LLM.BaseSpec
+    CodeStar.LLM.Gen
+    CodeStar.LLM.OllamaSpec
+    CodeStar.LLM.OpenAISpec
+    CodeStar.LocalizationSpec
+    CodeStar.MemorySpec
+    CodeStar.PermissionsSpec
+    CodeStar.PlanExecutionSpec
+    CodeStar.PlanningSpec
+    CodeStar.Platform.AuthSpec
+    CodeStar.Platform.CostTrackerSpec
+    CodeStar.Platform.SandboxSpec
+    CodeStar.Platform.SessionManagerSpec
+    CodeStar.RepoMap.CacheGcSpec
+    CodeStar.RepoMap.CacheSpec
+    CodeStar.RepoMap.Graph.Extract.HaskellSpec
+    CodeStar.RepoMap.Graph.Extract.PythonSpec
+    CodeStar.RepoMap.Graph.Extract.TypeScriptSpec
+    CodeStar.RepoMap.Graph.Extract.TypesSpec
+    CodeStar.RepoMap.Graph.ExtractSpec
+    CodeStar.RepoMap.GraphSpec
+    CodeStar.RepoMap.RenderSpec
+    CodeStar.RepoMap.WorkerSpec
+    CodeStar.SemanticSearchSpec
+    CodeStar.SignalSpec
+    CodeStar.StorageSpec
+    CodeStar.TelemetrySpec
+    CodeStar.Tools.EditSpec
+    CodeStar.Tools.Gen
+    CodeStar.Tools.GitSpec
+    CodeStar.Tools.GlobSpec
+    CodeStar.Tools.GrepSpec
+    CodeStar.Tools.MCPSpec
+    CodeStar.Tools.ReadSpec
+    CodeStar.Tools.RegistrySpec
+    CodeStar.Tools.ShellSpec
+    CodeStar.Tools.TestsSpec
+    CodeStar.Tools.TodoListSpec
+    CodeStar.Tools.WriteSpec
+    CodeStar.Transport.JsonRpcSpec
+    CodeStar.Transport.TypesSpec
+    CodeStar.Transport.WebSocketSpec
+    CodeStar.TreeSitter.GrammarsSpec
+    CodeStar.TreeSitterSpec
+    CodeStar.Types.Gen
+    CodeStar.TypesSpec
+    CodeStar.VerificationSpec
+  build-depends:
+      base
+    , aeson
+    , anthropic-protocol
+    , async
+    , bytestring
+    , codestar
+    , containers
+    , directory
+    , filepath
+    , hspec
+    , json-schema-combinators
+    , network
+    , openai-sdk
+    , optparse-applicative
+    , QuickCheck
+    , text
+    , vector
+    , websockets

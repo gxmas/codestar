@@ -1,0 +1,61 @@
+cabal-version:      3.0
+name:               storage-core
+version:            0.1.0.0
+synopsis:           General-purpose namespaced key-value store
+description:        Namespaced key-value store backed by the filesystem.
+                    Provides raw byte operations and JSON convenience wrappers.
+license:            MIT
+author:             Geoffrey Noël
+maintainer:         noel.geoff@gmail.com
+category:           Data
+build-type:         Simple
+
+common shared-properties
+    default-language: GHC2021
+    ghc-options:
+        -Wall
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
+    default-extensions:
+        DerivingStrategies
+        DuplicateRecordFields
+        LambdaCase
+        OverloadedRecordDot
+        OverloadedStrings
+
+library
+    import:           shared-properties
+    hs-source-dirs:   src
+    exposed-modules:
+        Storage.Core
+    build-depends:
+        base >=4.18 && <5,
+        telemetry-core,
+        aeson >=2.1,
+        bytestring >=0.11,
+        text >=2.0,
+        filepath >=1.4,
+        directory >=1.3
+
+test-suite storage-core-test
+    import:           shared-properties
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Spec.hs
+    build-depends:
+        base >=4.18 && <5,
+        storage-core,
+        hedgehog >=1.4,
+        tasty >=1.4,
+        tasty-hedgehog >=1.4,
+        temporary >=1.3
+    ghc-options:
+        -threaded
+        -rtsopts
+        -with-rtsopts=-N

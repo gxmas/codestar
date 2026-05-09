@@ -1,0 +1,84 @@
+cabal-version: 3.0
+name:          otel-exporter-prometheus
+version:       0.1.0.0
+synopsis:      OpenTelemetry Prometheus exporter
+description:
+  Prometheus pull-based metric exporter for the OpenTelemetry Haskell SDK.
+  Starts an embedded HTTP server (via Warp) that serves metrics in
+  Prometheus exposition format.
+
+license:       BSD-3-Clause
+homepage:      https://github.com/noel-geoff/otel-haskell
+bug-reports:   https://github.com/noel-geoff/otel-haskell/issues
+author:        Geoffrey Noel <noel.geoff@gmail.com>
+maintainer:    Geoffrey Noel <noel.geoff@gmail.com>
+category:      Network
+build-type:    Simple
+extra-doc-files: CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/noel-geoff/otel-haskell
+
+library
+  hs-source-dirs: src
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall
+  build-depends:
+    base >= 4.18 && < 4.22,
+    text >= 2.1 && < 2.2,
+    bytestring >= 0.12 && < 0.13,
+    stm >= 2.5 && < 2.6,
+    async >= 2.2 && < 2.3,
+    containers >= 0.7 && < 0.8,
+    warp >= 3.4 && < 3.5,
+    wai >= 3.2 && < 3.3,
+    http-types >= 0.12 && < 0.13,
+    otel-api >= 0.1 && < 0.2,
+    otel-sdk-common >= 0.1 && < 0.2,
+    otel-sdk-metrics >= 0.1 && < 0.2
+  exposed-modules:
+    OTel.Exporter.Prometheus
+
+test-suite otel-exporter-prometheus-test
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall -threaded
+  build-depends:
+    otel-exporter-prometheus,
+    base >= 4.18 && < 4.22,
+    tasty >= 1.5 && < 1.6,
+    tasty-quickcheck >= 0.11 && < 0.12,
+    tasty-hunit >= 0.10 && < 0.11,
+    http-client >= 0.7 && < 0.8,
+    bytestring >= 0.12 && < 0.13,
+    text >= 2.1 && < 2.2,
+    stm >= 2.5 && < 2.6,
+    async >= 2.2 && < 2.3,
+    containers >= 0.7 && < 0.8,
+    network >= 3.2 && < 3.3,
+    otel-sdk-metrics >= 0.1 && < 0.2,
+    otel-api >= 0.1 && < 0.2,
+    otel-sdk-common >= 0.1 && < 0.2

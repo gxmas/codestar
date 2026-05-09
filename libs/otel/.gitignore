@@ -1,0 +1,37 @@
+# Cabal build artifacts
+dist-newstyle/
+dist/
+
+# GHC artifacts
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+*.chi
+*.chs.h
+
+# Cabal sandbox (legacy)
+.cabal-sandbox/
+cabal.sandbox.config
+
+# Stack (if ever used)
+.stack-work/
+
+# Editor artifacts
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+*.iml
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Generated proto files
+# (tracked selectively — see proto/ directory)
+
+# Credentials / secrets
+*.pem
+*.key

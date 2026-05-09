@@ -1,0 +1,76 @@
+cabal-version: 3.0
+name:          otel-exporter-inmemory
+version:       0.1.0.0
+synopsis:      OpenTelemetry in-memory exporter for testing
+description:
+  In-memory exporter for the OpenTelemetry Haskell SDK that collects
+  exported spans, metrics, and log records in a TVar for test assertions.
+  Designed for use in test suites, not production.
+
+license:       BSD-3-Clause
+homepage:      https://github.com/noel-geoff/otel-haskell
+bug-reports:   https://github.com/noel-geoff/otel-haskell/issues
+author:        Geoffrey Noel <noel.geoff@gmail.com>
+maintainer:    Geoffrey Noel <noel.geoff@gmail.com>
+category:      Network
+build-type:    Simple
+extra-doc-files: CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/noel-geoff/otel-haskell
+
+library
+  hs-source-dirs: src
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall
+  build-depends:
+    base >= 4.18 && < 4.22,
+    stm >= 2.5 && < 2.6,
+    otel-api >= 0.1 && < 0.2,
+    otel-sdk-common >= 0.1 && < 0.2,
+    otel-sdk-traces >= 0.1 && < 0.2,
+    otel-sdk-metrics >= 0.1 && < 0.2,
+    otel-sdk-logs >= 0.1 && < 0.2
+  exposed-modules:
+    OTel.Exporter.InMemory
+
+test-suite otel-exporter-inmemory-test
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -Wall
+  build-depends:
+    otel-exporter-inmemory,
+    otel-api >= 0.1 && < 0.2,
+    otel-sdk-common >= 0.1 && < 0.2,
+    otel-sdk-traces >= 0.1 && < 0.2,
+    otel-sdk-metrics >= 0.1 && < 0.2,
+    otel-sdk-logs >= 0.1 && < 0.2,
+    base >= 4.18 && < 4.22,
+    stm >= 2.5 && < 2.6,
+    tasty >= 1.5 && < 1.6,
+    tasty-hunit >= 0.10 && < 0.11,
+    tasty-quickcheck >= 0.11 && < 0.12,
+    async >= 2.2 && < 2.3

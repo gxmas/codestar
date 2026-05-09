@@ -1,0 +1,162 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+
+module CodeStar.Transport.Types
+  ( -- * Transport handle
+    AgentTransportDict (..)
+
+    -- * Commands (client → server)
+  , Command (..)
+  , CommandResult (..)
+
+    -- * Events (server → client)
+  , AgentEventEnvelope (..)
+  ) where
+
+import Data.Aeson
+  ( FromJSON (..)
+  , ToJSON (..)
+  , object
+  , withObject
+  , (.:)
+  , (.=)
+  )
+import Data.Text (Text)
+import Data.Text qualified as Text
+import GHC.Generics (Generic)
+
+import CodeStar.AgentLoop (AgentEvent (..), ApprovalDecision (..))
+import CodeStar.LLM.Base (ToolName (..))
+import CodeStar.Types (CheckResult (..), ControlSignal (..), Evidence (..), SessionId (..))
+import Data.Aeson.Types (Parser)
+
+-- --------------------------------------------------------------------
+-- Commands (client → server)
+-- --------------------------------------------------------------------
+
+data Command
+  = CmdStart
+      { sessionId :: !SessionId
+      , task :: !Text
+      }
+  | CmdRespond
+      { sessionId :: !SessionId
+      , response :: !Text
+      }
+  | CmdApprove
+      { sessionId :: !SessionId
+      }
+  | CmdReject
+      { sessionId :: !SessionId
+      , reason :: !Text
+      }
+  | CmdCompact
+      { sessionId :: !SessionId
+      , instruction :: !(Maybe Text)
+      }
+  | CmdStop
+      { sessionId :: !SessionId
+      }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+data CommandResult
+  = CmdOk
+  | CmdErr !Text
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- --------------------------------------------------------------------
+-- Events (server → client)
+-- --------------------------------------------------------------------
+
+-- | Wraps an AgentEvent with the originating session ID for multiplexing.
+data AgentEventEnvelope = AgentEventEnvelope
+  { envSessionId :: !SessionId
+  , envEvent :: !AgentEvent
+  }
+  deriving stock (Show, Generic)
+
+instance ToJSON AgentEvent where
+  toJSON (AgentToken t) =
+    object ["type" .= ("token" :: Text), "token" .= t]
+  toJSON (AgentToolCall (ToolName n) a) =
+    object ["type" .= ("toolCall" :: Text), "tool" .= n, "arguments" .= a]
+  toJSON (AgentToolResult (ToolName n) r) =
+    object ["type" .= ("toolResult" :: Text), "tool" .= n, "output" .= r]
+  toJSON (AgentApprovalRequired (ToolName n) r) =
+    object ["type" .= ("needsApproval" :: Text), "tool" .= n, "reason" .= r]
+  toJSON AgentCompacting =
+    object ["type" .= ("compacting" :: Text)]
+  toJSON (AgentProgress msg) =
+    object ["type" .= ("progress" :: Text), "message" .= msg]
+  toJSON (AgentCostUpdate i o) =
+    object ["type" .= ("cost" :: Text), "inputTokens" .= i, "outputTokens" .= o]
+  toJSON (AgentDone sig) =
+    object ["type" .= ("done" :: Text), "signal" .= show sig]
+  toJSON (AgentError msg) =
+    object ["type" .= ("error" :: Text), "message" .= msg]
+
+instance FromJSON AgentEvent where
+  parseJSON = withObject "AgentEvent" $ \o -> do
+    tag <- o .: "type" :: Parser Text
+    case tag of
+      "token" -> AgentToken <$> o .: "token"
+      "toolCall" -> AgentToolCall <$> (ToolName <$> o .: "tool") <*> o .: "arguments"
+      "toolResult" -> AgentToolResult <$> (ToolName <$> o .: "tool") <*> o .: "output"
+      "needsApproval" -> AgentApprovalRequired <$> (ToolName <$> o .: "tool") <*> o .: "reason"
+      "compacting" -> pure AgentCompacting
+      "progress" -> AgentProgress <$> o .: "message"
+      "cost" -> AgentCostUpdate <$> o .: "inputTokens" <*> o .: "outputTokens"
+      "done" -> pure (AgentDone (Done emptyEvidence))
+      "error" -> AgentError <$> o .: "message"
+      _ -> fail ("Unknown AgentEvent type: " <> show tag)
+
+emptyEvidence :: Evidence
+emptyEvidence =
+  Evidence
+    { testsPass = NotChecked
+    , buildSucceeds = NotChecked
+    , filesVerified = []
+    , regressions = []
+    }
+
+instance ToJSON AgentEventEnvelope where
+  toJSON env = object ["sessionId" .= env.envSessionId, "event" .= env.envEvent]
+
+instance FromJSON AgentEventEnvelope where
+  parseJSON = withObject "AgentEventEnvelope" $ \o ->
+    AgentEventEnvelope <$> o .: "sessionId" <*> o .: "event"
+
+instance ToJSON ApprovalDecision where
+  toJSON Approved = object ["decision" .= ("approved" :: Text)]
+  toJSON (Rejected msg) = object ["decision" .= ("rejected" :: Text), "reason" .= msg]
+
+instance FromJSON ApprovalDecision where
+  parseJSON = withObject "ApprovalDecision" $ \o -> do
+    d <- o .: "decision" :: Parser Text
+    case d of
+      "approved" -> pure Approved
+      "rejected" -> do
+        reason <- Text.strip <$> o .: "reason"
+        if Text.null reason
+          then fail "Rejected decision requires non-empty reason"
+          else pure (Rejected reason)
+      _ -> fail ("Unknown decision: " <> show d)
+
+-- --------------------------------------------------------------------
+-- Transport handle
+-- --------------------------------------------------------------------
+
+{- | Record-of-functions for sending events and receiving commands.
+Implementations: in-process (for tests), WebSocket/JSON-RPC (for server).
+-}
+data AgentTransportDict = AgentTransportDict
+  { sendEvent :: AgentEventEnvelope -> IO ()
+  -- ^ Push an event to the connected client.
+  , onCommand :: (Command -> IO CommandResult) -> IO ()
+  -- ^ Register a handler that is called for each inbound command.
+  , listen :: IO ()
+  -- ^ Block and process incoming commands until the connection closes.
+  , shutdown :: IO ()
+  -- ^ Gracefully close the transport connection.
+  }

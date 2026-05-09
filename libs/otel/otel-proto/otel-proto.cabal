@@ -1,0 +1,61 @@
+cabal-version: 3.0
+name:          otel-proto
+version:       0.1.0.0
+synopsis:      Generated protobuf types for OpenTelemetry (internal, not published)
+description:
+  Proto-lens generated Haskell types from the opentelemetry-proto
+  definitions. This is an internal package used by the OTLP exporter
+  packages. Not intended for direct consumption or Hackage publication.
+  Generated from opentelemetry-proto v1.10.0.
+
+license:       BSD-3-Clause
+homepage:      https://github.com/noel-geoff/otel-haskell
+bug-reports:   https://github.com/noel-geoff/otel-haskell/issues
+author:        Geoffrey Noel <noel.geoff@gmail.com>
+maintainer:    Geoffrey Noel <noel.geoff@gmail.com>
+category:      Network
+build-type:    Simple
+extra-doc-files: CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/noel-geoff/otel-haskell
+
+library
+  default-language: GHC2021
+
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    DerivingStrategies
+
+  ghc-options: -Wall -Wno-unused-imports -Wno-missing-export-lists
+
+  build-depends:
+      base >= 4.18 && < 4.22
+    , proto-lens-runtime >= 0.7 && < 0.8
+    , text >= 2.1 && < 2.2
+    , bytestring >= 0.12 && < 0.13
+    , vector >= 0.13 && < 0.14
+    , lens-family >= 2.1 && < 2.2
+    , lens-family-core >= 2.1 && < 3
+
+  hs-source-dirs: src
+
+  exposed-modules:
+    Proto.Opentelemetry.Proto.Common.V1.Common
+    Proto.Opentelemetry.Proto.Common.V1.Common_Fields
+    Proto.Opentelemetry.Proto.Resource.V1.Resource
+    Proto.Opentelemetry.Proto.Resource.V1.Resource_Fields
+    Proto.Opentelemetry.Proto.Trace.V1.Trace
+    Proto.Opentelemetry.Proto.Trace.V1.Trace_Fields
+    Proto.Opentelemetry.Proto.Metrics.V1.Metrics
+    Proto.Opentelemetry.Proto.Metrics.V1.Metrics_Fields
+    Proto.Opentelemetry.Proto.Logs.V1.Logs
+    Proto.Opentelemetry.Proto.Logs.V1.Logs_Fields
+    Proto.Opentelemetry.Proto.Collector.Trace.V1.TraceService
+    Proto.Opentelemetry.Proto.Collector.Trace.V1.TraceService_Fields
+    Proto.Opentelemetry.Proto.Collector.Metrics.V1.MetricsService
+    Proto.Opentelemetry.Proto.Collector.Metrics.V1.MetricsService_Fields
+    Proto.Opentelemetry.Proto.Collector.Logs.V1.LogsService
+    Proto.Opentelemetry.Proto.Collector.Logs.V1.LogsService_Fields

@@ -1,0 +1,71 @@
+cabal-version: 3.0
+name:          mcp-session
+version:       0.1.0.0
+synopsis:      Session layer for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Session
+    Network.MCP.Session.Connect
+
+  build-depends:
+    , aeson                >= 2.1
+    , async                >= 2.2
+    , base                 >= 4.16 && < 5
+    , json-rpc-client
+    , json-rpc-core
+    , json-rpc-server
+    , mcp-core
+    , mcp-transport
+    , stm                  >= 2.5
+    , streaming            >= 0.2
+    , text                 >= 2.0
+    , unordered-containers >= 0.2.16
+
+test-suite mcp-session-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  ghc-options:    -threaded
+  other-modules:
+    Network.MCP.Session.ConnectSpec
+  build-depends:
+    , aeson                >= 2.1
+    , async                >= 2.2
+    , base                 >= 4.16 && < 5
+    , hspec                >= 2.9
+    , mcp-core
+    , mcp-session
+    , mcp-transport
+    , mcp-transport-stdio
+    , process              >= 1.6
+    , stm                  >= 2.5
+    , streaming            >= 0.2
+    , text                 >= 2.0
+    , unordered-containers >= 0.2
+
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

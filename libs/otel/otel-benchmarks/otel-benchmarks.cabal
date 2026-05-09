@@ -1,0 +1,47 @@
+cabal-version: 3.0
+name:          otel-benchmarks
+version:       0.1.0.0
+synopsis:      OpenTelemetry SDK performance benchmarks
+description:
+  Performance benchmarks for the OpenTelemetry Haskell SDK covering span
+  creation, metric recording, and export pipeline throughput.
+
+license:       BSD-3-Clause
+homepage:      https://github.com/noel-geoff/otel-haskell
+bug-reports:   https://github.com/noel-geoff/otel-haskell/issues
+author:        Geoffrey Noel <noel.geoff@gmail.com>
+maintainer:    Geoffrey Noel <noel.geoff@gmail.com>
+category:      Network
+build-type:    Simple
+extra-doc-files: CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/noel-geoff/otel-haskell
+
+benchmark otel-benchmarks-bench
+  type: exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is: Main.hs
+  default-language: GHC2021
+  default-extensions:
+    StrictData
+    OverloadedStrings
+    OverloadedRecordDot
+    DuplicateRecordFields
+    DerivingStrategies
+    GADTs
+    DataKinds
+    KindSignatures
+    TypeFamilies
+  ghc-options: -O2 -Wall -threaded
+  build-depends:
+    base >= 4.18 && < 4.22,
+    tasty-bench >= 0.5 && < 0.6,
+    otel-api >= 0.1 && < 0.2,
+    otel-sdk-common >= 0.1 && < 0.2,
+    otel-sdk-traces >= 0.1 && < 0.2,
+    otel-sdk-metrics >= 0.1 && < 0.2,
+    otel-exporter-inmemory >= 0.1 && < 0.2,
+    stm >= 2.5 && < 2.6,
+    deepseq >= 1.5 && < 1.6
