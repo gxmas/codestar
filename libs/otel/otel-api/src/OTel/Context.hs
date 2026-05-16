@@ -4,8 +4,8 @@
 -- 'Context' stores typed values indexed by 'ContextKey'. The primary API is
 -- explicit context passing via 'root', 'getValue', and 'setValue'. The global
 -- attach\/detach mechanism ('attach', 'detach', 'getCurrent') is provided for
--- spec compliance but is not thread-safe; prefer explicit passing in
--- concurrent code.
+-- spec compliance and maintains a per-thread context stack, so it is safe to
+-- use from concurrent threads.
 module OTel.Context
   ( -- * Context
     Context
@@ -19,8 +19,9 @@ module OTel.Context
   , detach
   ) where
 
+import Control.Concurrent (ThreadId, myThreadId)
 import Data.Dynamic (Dynamic, toDyn, fromDynamic)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Typeable (Typeable)
@@ -58,15 +59,14 @@ setValue key val (Context m) = Context (Map.insert (keyId key) (toDyn val) m)
 -- Global context (spec compliance)
 -- --------------------------------------------------------------------------
 
--- | Global context stack. The stack is never empty; 'root' is always at the
--- bottom.
+-- | Per-thread context stacks keyed by 'ThreadId'. Each thread's stack is
+-- never empty while attached; 'root' is the implicit bottom. Threads that
+-- have no entry in the map are treated as having only 'root'.
 --
--- This is intentionally a simple 'IORef' — it is /not/ thread-safe. The
--- idiomatic Haskell path is explicit 'Context' passing. This global mechanism
--- exists solely for OTel spec compliance in single-threaded attach\/detach
--- scenarios.
-currentContextRef :: IORef [Context]
-currentContextRef = unsafePerformIO (newIORef [root])
+-- Thread safety: each thread only mutates its own entry; 'atomicModifyIORef''
+-- ensures the read-modify-write on the shared 'Map' is atomic.
+currentContextRef :: IORef (Map ThreadId [Context])
+currentContextRef = unsafePerformIO (newIORef Map.empty)
 {-# NOINLINE currentContextRef #-}
 
 
@@ -75,32 +75,39 @@ currentContextRef = unsafePerformIO (newIORef [root])
 newtype Token = Token { _tokenDepth :: Int }
 
 
--- | Get the current active context from the global stack.
+-- | Get the current active context from this thread's stack.
 getCurrent :: IO Context
 getCurrent = do
-  stack <- readIORef currentContextRef
-  case stack of
-    [] -> pure root -- should not happen; defensive
-    (ctx : _) -> pure ctx
+  tid <- myThreadId
+  m <- readIORef currentContextRef
+  case Map.lookup tid m of
+    Nothing -> pure root
+    Just [] -> pure root -- should not happen; defensive
+    Just (ctx : _) -> pure ctx
 
 
--- | Push a context onto the global stack, returning a 'Token' that can
+-- | Push a context onto this thread's stack, returning a 'Token' that can
 -- restore the previous state via 'detach'.
 attach :: Context -> IO Token
 attach ctx = do
-  stack <- readIORef currentContextRef
-  let depth = length stack
-  writeIORef currentContextRef (ctx : stack)
-  pure (Token depth)
+  tid <- myThreadId
+  atomicModifyIORef' currentContextRef $ \m ->
+    let stack = Map.findWithDefault [] tid m
+        depth = length stack
+    in (Map.insert tid (ctx : stack) m, Token depth)
 
 
 -- | Restore the context that was active before the corresponding 'attach'.
 --
 -- Per the OTel spec, mismatched detach calls are silently tolerated.
+-- When the last context is popped, the thread's entry is removed from
+-- the map to avoid leaking memory for short-lived threads.
 detach :: Token -> IO ()
 detach (Token _depth) = do
-  stack <- readIORef currentContextRef
-  case stack of
-    [] -> pure () -- should not happen
-    [_] -> pure () -- never pop root
-    (_ : rest) -> writeIORef currentContextRef rest
+  tid <- myThreadId
+  atomicModifyIORef' currentContextRef $ \m ->
+    case Map.lookup tid m of
+      Nothing -> (m, ())
+      Just [] -> (Map.delete tid m, ())  -- should not happen
+      Just [_] -> (Map.delete tid m, ()) -- last entry; clean up
+      Just (_ : rest) -> (Map.insert tid rest m, ())

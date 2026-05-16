@@ -58,7 +58,8 @@ import Data.Time
   )
 import GHC.Generics (Generic)
 
-import Telemetry.Core (withSpan, AttributeValue (..))
+import OTel.Trace (withSpan, SomeTracer, getGlobalTracerProvider, getTracer)
+import OTel.Attribute (AttributeValue(..), InstrumentationScope(..))
 
 -- ---------------------------------------------------------------------------
 -- Keys and values
@@ -157,12 +158,22 @@ emptyNamespace policy = NamespaceState Map.empty policy emptyStats
 -- Store
 -- ---------------------------------------------------------------------------
 
-newtype CacheStore = CacheStore
+data CacheStore = CacheStore
   { storeVar :: TVar (Map CacheNamespace NamespaceState)
+  , storeTracer :: SomeTracer
   }
 
 newCacheStore :: IO CacheStore
-newCacheStore = CacheStore <$> newTVarIO Map.empty
+newCacheStore = do
+  var <- newTVarIO Map.empty
+  provider <- getGlobalTracerProvider
+  tracer <- getTracer provider InstrumentationScope
+    { scopeName = "cache-core"
+    , scopeVersion = Nothing
+    , scopeSchemaUrl = Nothing
+    , scopeAttributes = Nothing
+    }
+  pure CacheStore { storeVar = var, storeTracer = tracer }
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -245,9 +256,9 @@ matchesGlob pattern key = go (T.unpack pattern) (T.unpack key)
 
 cacheGet :: CacheStore -> CacheNamespace -> CacheKey -> IO (Maybe ByteString)
 cacheGet store (CacheNamespace nsText) (CacheKey keyText) =
-  withSpan "cache.get"
-    [ ("cache.namespace", TextValue nsText)
-    , ("cache.key", TextValue keyText)
+  withSpan (storeTracer store) "cache.get"
+    [ ("cache.namespace", StringValue nsText)
+    , ("cache.key", StringValue keyText)
     ] $ do
   let ns = CacheNamespace nsText
       key = CacheKey keyText
@@ -290,9 +301,9 @@ cachePut
   -> Maybe NominalDiffTime
   -> IO ()
 cachePut store (CacheNamespace nsText) (CacheKey keyText) value mTtl =
-  withSpan "cache.set"
-    [ ("cache.namespace", TextValue nsText)
-    , ("cache.key", TextValue keyText)
+  withSpan (storeTracer store) "cache.set"
+    [ ("cache.namespace", StringValue nsText)
+    , ("cache.key", StringValue keyText)
     ] $ do
   let ns = CacheNamespace nsText
       key = CacheKey keyText
@@ -354,9 +365,9 @@ cachePutMany store ns entries =
 
 cacheInvalidate :: CacheStore -> CacheNamespace -> CacheKey -> IO ()
 cacheInvalidate store (CacheNamespace nsText) (CacheKey keyText) =
-  withSpan "cache.evict"
-    [ ("cache.namespace", TextValue nsText)
-    , ("cache.key", TextValue keyText)
+  withSpan (storeTracer store) "cache.evict"
+    [ ("cache.namespace", StringValue nsText)
+    , ("cache.key", StringValue keyText)
     ] $ do
   let ns = CacheNamespace nsText
       key = CacheKey keyText

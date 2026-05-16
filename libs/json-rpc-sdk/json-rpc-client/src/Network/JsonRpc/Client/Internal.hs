@@ -57,7 +57,8 @@ import Data.Scientific (fromFloatDigits)
 import Data.Text (Text)
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Network.JsonRpc.Types.Internal
-import Telemetry.Core (withSpan, AttributeValue (..), SpanName (..))
+import OTel.Trace (withSpan, SomeTracer, getGlobalTracerProvider, getTracer)
+import OTel.Attribute (AttributeValue(..), InstrumentationScope(..))
 
 -- ====================================================================
 -- Id generation
@@ -125,6 +126,7 @@ data Client = Client
     { clientPending :: !(IORef (HashMap Id PendingEntry))
     , clientIdGen :: !(IORef IdGenerator)
     , clientConfig :: !ClientConfig
+    , clientTracer :: !SomeTracer
     }
 
 {- | Create a new client with the given configuration. Uses
@@ -135,7 +137,14 @@ newClient config = do
     pendingRef <- newIORef HM.empty
     gen <- sequentialIds
     genRef <- newIORef gen
-    pure (Client pendingRef genRef config)
+    provider <- getGlobalTracerProvider
+    tracer <- getTracer provider InstrumentationScope
+        { scopeName       = "json-rpc-client"
+        , scopeVersion    = Nothing
+        , scopeSchemaUrl  = Nothing
+        , scopeAttributes = Nothing
+        }
+    pure (Client pendingRef genRef config tracer)
 
 {- | Replace the client's id generator. Useful for custom id schemes
 (e.g., UUIDs).
@@ -165,7 +174,7 @@ and send.
 -}
 request :: Client -> Text -> Params -> IO PendingRequest
 request c methodName params =
-    withSpan (SpanName "rpc.client.request") [("rpc.system", TextValue "jsonrpc"), ("rpc.method", TextValue methodName)] $ do
+    withSpan (clientTracer c) "rpc.client.request" [("rpc.system", StringValue "jsonrpc"), ("rpc.method", StringValue methodName)] $ do
         gen <- readIORef (clientIdGen c)
         reqId <- nextId gen
         now <- getCurrentTime
@@ -179,8 +188,8 @@ request c methodName params =
 will not reply).
 -}
 notify :: Client -> Text -> Params -> IO Notification
-notify _c methodName params =
-    withSpan (SpanName "rpc.client.notify") [("rpc.system", TextValue "jsonrpc"), ("rpc.method", TextValue methodName)] $
+notify c methodName params =
+    withSpan (clientTracer c) "rpc.client.notify" [("rpc.system", StringValue "jsonrpc"), ("rpc.method", StringValue methodName)] $
         pure (Notification methodName params)
 
 -- ====================================================================

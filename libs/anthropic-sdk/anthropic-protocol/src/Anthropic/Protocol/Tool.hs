@@ -1,7 +1,4 @@
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
--- The with* setters use record update syntax on the cacheControl field
--- shared between CustomToolDef and ServerToolDef. The type signature on
--- each setter makes the target type unambiguous. See ADR-010.
+{-# LANGUAGE RecordWildCards #-}
 
 -- | Tool definition, tool choice, and server tool types.
 module Anthropic.Protocol.Tool
@@ -236,11 +233,11 @@ serverToolDef ty n = ServerToolDef
 
 -- | Set the cache control on a server tool definition.
 withServerToolCacheControl :: CacheControl -> ServerToolDef -> ServerToolDef
-withServerToolCacheControl x t = t { cacheControl = Just x }
+withServerToolCacheControl x t = let ServerToolDef{..} = t in ServerToolDef{cacheControl = Just x, ..}
 
 -- | Set tool-specific configuration (allowed_domains, max_uses, etc.).
 withExtraConfig :: Value -> ServerToolDef -> ServerToolDef
-withExtraConfig x t = t { extraConfig = Just x }
+withExtraConfig x t = let ServerToolDef{..} = t in ServerToolDef{extraConfig = Just x, ..}
 
 -- | A custom tool definition with a JSON Schema for input validation.
 --
@@ -302,11 +299,11 @@ customToolDef n s = CustomToolDef
 
 -- | Set the tool description.
 withDescription :: Text -> CustomToolDef -> CustomToolDef
-withDescription x t = t { description = Just x }
+withDescription x t = let CustomToolDef{..} = t in CustomToolDef{description = Just x, ..}
 
 -- | Set the cache control on a custom tool definition.
 withCustomToolCacheControl :: CacheControl -> CustomToolDef -> CustomToolDef
-withCustomToolCacheControl x t = t { cacheControl = Just x }
+withCustomToolCacheControl x t = let CustomToolDef{..} = t in CustomToolDef{cacheControl = Just x, ..}
 
 -- | A tool definition: either a custom tool or a server-provided tool.
 data ToolDefinition

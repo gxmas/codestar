@@ -66,9 +66,9 @@ spec = describe "CodeStar.LLM.Base" $ do
         fallback =
           LlmClientDict
             { clientInfo = ClientInfo "fallback" "m"
-            , complete = \_ -> writeIORef fallbackCalled True >> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-            , stream = \_ _ -> writeIORef fallbackCalled True >> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-            , countTokens = \_ -> writeIORef fallbackCalled True >> pure (Right (TokenCount 0 0))
+            , complete = \_ -> writeIORef fallbackCalled True >> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+            , stream = \_ _ -> writeIORef fallbackCalled True >> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+            , countTokens = \_ -> writeIORef fallbackCalled True >> pure (Right (TokenCount 0 0 0 0))
             }
         wrapped = withFallback primary fallback
     res <- wrapped.complete minimalReq
@@ -81,20 +81,20 @@ spec = describe "CodeStar.LLM.Base" $ do
     let primary =
           LlmClientDict
             { clientInfo = ClientInfo "primary" "m"
-            , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
+            , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
             , stream = \_ _ -> pure (Left (NetworkError "down"))
             , countTokens = \_ -> pure (Left (RateLimited 0.1))
             }
         fallback =
           LlmClientDict
             { clientInfo = ClientInfo "fallback" "m"
-            , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
+            , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
             , stream = \_ _ -> do
                 writeIORef streamFallbackCalled True
-                pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
+                pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
             , countTokens = \_ -> do
                 writeIORef countFallbackCalled True
-                pure (Right (TokenCount 1 2))
+                pure (Right (TokenCount 1 2 0 0))
             }
         wrapped = withFallback primary fallback
     _ <- wrapped.stream minimalReq (\_ -> pure ())
@@ -166,9 +166,9 @@ mkClient provider model =
   pure
     LlmClientDict
       { clientInfo = ClientInfo provider model
-      , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-      , stream = \_ _ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-      , countTokens = \_ -> pure (Right (TokenCount 0 0))
+      , complete = \_ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+      , stream = \_ _ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+      , countTokens = \_ -> pure (Right (TokenCount 0 0 0 0))
       }
 
 mkRecordingClient :: IORef (Maybe CompletionRequest) -> IO LlmClientDict
@@ -178,9 +178,9 @@ mkRecordingClient ref =
       { clientInfo = ClientInfo "rec" "model"
       , complete = \req -> do
           writeIORef ref (Just req)
-          pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-      , stream = \_ _ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0)))
-      , countTokens = \_ -> pure (Right (TokenCount 0 0))
+          pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+      , stream = \_ _ -> pure (Right (CompletionResponse [] EndTurn (TokenCount 0 0 0 0)))
+      , countTokens = \_ -> pure (Right (TokenCount 0 0 0 0))
       }
 
 isRight :: Either a b -> Bool

@@ -34,7 +34,7 @@ loadFromEnv = do
         (Last Nothing)
         (Last Nothing)
         (PartialServerSection (Last sPort) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing))
-        (PartialTelemetrySection (Last telMode) (Last Nothing) (Last (Just <$> telEndpoint)) (Last Nothing) (Last Nothing) (Last telMetricsBindHost) (Last (Just <$> telMetricsPort)))
+        (PartialTelemetrySection (Last telMode) (Last Nothing) (Last (Just <$> telEndpoint)) (Last Nothing) (Last Nothing) (Last telMetricsBindHost) (Last (Just <$> telMetricsPort)) (Last Nothing))
         (PartialContextSection (Last ctxMax) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing))
         (PartialCompactionSection (Last Nothing) (Last Nothing))
         (PartialShellSection (Last shellTo) (Last Nothing) (Last Nothing))

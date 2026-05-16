@@ -49,7 +49,8 @@ import System.Directory
 import System.FilePath ((</>), takeDirectory, takeExtension, dropExtension)
 import qualified System.Environment
 
-import Telemetry.Core (withSpan, AttributeValue (..))
+import OTel.Trace (withSpan, SomeTracer, getGlobalTracerProvider, getTracer)
+import OTel.Attribute (AttributeValue(..), InstrumentationScope(..))
 
 -- ---------------------------------------------------------------------------
 -- Core types
@@ -64,7 +65,10 @@ data StorageError
   | StorageIOError Text
   deriving stock (Eq, Show)
 
-newtype Storage = Storage { storageRoot :: FilePath }
+data Storage = Storage
+  { storageRoot :: FilePath
+  , storageTracer :: SomeTracer
+  }
 
 -- ---------------------------------------------------------------------------
 -- Handle construction
@@ -73,7 +77,14 @@ newtype Storage = Storage { storageRoot :: FilePath }
 createStorage :: FilePath -> IO Storage
 createStorage root = do
   createDirectoryIfMissing True root
-  pure (Storage root)
+  provider <- getGlobalTracerProvider
+  tracer <- getTracer provider InstrumentationScope
+    { scopeName = "storage-core"
+    , scopeVersion = Nothing
+    , scopeSchemaUrl = Nothing
+    , scopeAttributes = Nothing
+    }
+  pure Storage { storageRoot = root, storageTracer = tracer }
 
 createDefaultStorage :: IO Storage
 createDefaultStorage = do
@@ -85,11 +96,11 @@ createDefaultStorage = do
 -- ---------------------------------------------------------------------------
 
 valuePath :: Storage -> Namespace -> Key -> FilePath
-valuePath (Storage root) ns key =
+valuePath (Storage { storageRoot = root }) ns key =
   root </> T.unpack ns </> T.unpack key <> ".json"
 
 nsDir :: Storage -> Namespace -> FilePath
-nsDir (Storage root) ns = root </> T.unpack ns
+nsDir (Storage { storageRoot = root }) ns = root </> T.unpack ns
 
 -- ---------------------------------------------------------------------------
 -- Raw byte operations
@@ -97,9 +108,9 @@ nsDir (Storage root) ns = root </> T.unpack ns
 
 putValue :: Storage -> Namespace -> Key -> ByteString -> IO (Either StorageError ())
 putValue store ns key bytes =
-  withSpan "db.operation"
-    [ ("db.operation", TextValue "write")
-    , ("db.namespace", TextValue ns)
+  withSpan (storageTracer store) "db.operation"
+    [ ("db.operation", StringValue "write")
+    , ("db.namespace", StringValue ns)
     ] $ do
     let path = valuePath store ns key
     createDirectoryIfMissing True (takeDirectory path)
@@ -110,9 +121,9 @@ putValue store ns key bytes =
 
 getValue :: Storage -> Namespace -> Key -> IO (Either StorageError ByteString)
 getValue store ns key =
-  withSpan "db.operation"
-    [ ("db.operation", TextValue "read")
-    , ("db.namespace", TextValue ns)
+  withSpan (storageTracer store) "db.operation"
+    [ ("db.operation", StringValue "read")
+    , ("db.namespace", StringValue ns)
     ] $ do
     let path = valuePath store ns key
     exists <- doesFileExist path
@@ -126,9 +137,9 @@ getValue store ns key =
 
 deleteValue :: Storage -> Namespace -> Key -> IO (Either StorageError ())
 deleteValue store ns key =
-  withSpan "db.operation"
-    [ ("db.operation", TextValue "delete")
-    , ("db.namespace", TextValue ns)
+  withSpan (storageTracer store) "db.operation"
+    [ ("db.operation", StringValue "delete")
+    , ("db.namespace", StringValue ns)
     ] $ do
     let path = valuePath store ns key
     exists <- doesFileExist path

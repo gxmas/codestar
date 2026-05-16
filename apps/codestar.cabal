@@ -114,7 +114,13 @@ library
     , optparse-applicative
     , resilience
     , storage-core
-    , telemetry-core
+    , otel-api
+    , otel-sdk-common
+    , otel-sdk-traces
+    , otel-sdk-metrics
+    , otel-sdk-logs
+    , otel-exporter-otlp-http
+    , otel-exporter-prometheus
     , toml-reader >= 0.3
     , typed-process
     , stm
@@ -165,6 +171,8 @@ executable codestar-server
     , codestar
     , directory
     , filepath
+    , otel-api
+    , resilience
     , stm
     , text
     , wai
@@ -192,6 +200,7 @@ test-suite codestar-test
   hs-source-dirs: test
   main-is:        Spec.hs
   other-modules:
+    CodeStar.AgentTelemetrySpec
     CodeStar.AgentLoopSpec
     CodeStar.CompactionSpec
     CodeStar.Config.DefaultsSpec
@@ -209,6 +218,8 @@ test-suite codestar-test
     CodeStar.ContextSpec
     CodeStar.GuardrailsSpec
     CodeStar.HistorySpec
+    CodeStar.LlmRetrySpec
+    CodeStar.LlmRetryFieldSpec
     CodeStar.LLM.AnthropicSpec
     CodeStar.LLM.BaseSpec
     CodeStar.LLM.Gen
@@ -218,6 +229,8 @@ test-suite codestar-test
     CodeStar.MemorySpec
     CodeStar.PermissionsSpec
     CodeStar.PlanExecutionSpec
+    CodeStar.PlanTelemetrySpec
+    CodeStar.PlanTelemetryExtraSpec
     CodeStar.PlanningSpec
     CodeStar.Platform.AuthSpec
     CodeStar.Platform.CostTrackerSpec
@@ -233,10 +246,16 @@ test-suite codestar-test
     CodeStar.RepoMap.GraphSpec
     CodeStar.RepoMap.RenderSpec
     CodeStar.RepoMap.WorkerSpec
+    CodeStar.SamplingSpec
     CodeStar.SemanticSearchSpec
     CodeStar.SignalSpec
+    CodeStar.SpanAttributeSpec
     CodeStar.StorageSpec
+    CodeStar.ServerSpanSafetySpec
+    CodeStar.SessionLifecycleSpec
     CodeStar.TelemetrySpec
+    CodeStar.TelemetrySpanSpec
+    OTel.ContextThreadSpec
     CodeStar.Tools.EditSpec
     CodeStar.Tools.Gen
     CodeStar.Tools.GitSpec
@@ -272,7 +291,11 @@ test-suite codestar-test
     , network
     , openai-sdk
     , optparse-applicative
+    , otel-api
+    , otel-sdk-traces
     , QuickCheck
+    , resilience
+    , stm
     , text
     , vector
     , websockets

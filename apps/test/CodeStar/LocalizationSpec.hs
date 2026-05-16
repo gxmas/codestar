@@ -110,10 +110,10 @@ mkClient responses = do
                   CompletionResponse
                     { responseContent = [TextContent x]
                     , stopReason = EndTurn
-                    , usage = TokenCount 0 0
+                    , usage = TokenCount 0 0 0 0
                     }
       , stream = \_ _ -> pure (Left (ProviderError "unused"))
-      , countTokens = \_ -> pure (Right (TokenCount 0 0))
+      , countTokens = \_ -> pure (Right (TokenCount 0 0 0 0))
       }
 
 mkFailingClient :: Text.Text -> LlmClientDict
@@ -122,7 +122,7 @@ mkFailingClient msg =
     { clientInfo = ClientInfo "spec" "failing"
     , complete = \_ -> pure (Left (ProviderError msg))
     , stream = \_ _ -> pure (Left (ProviderError msg))
-    , countTokens = \_ -> pure (Right (TokenCount 0 0))
+    , countTokens = \_ -> pure (Right (TokenCount 0 0 0 0))
     }
 
 isLeft :: Either a b -> Bool

@@ -98,6 +98,7 @@ telemetryDecoder = do
   me <- getFieldOpt "metrics_enabled"
   mbh <- getFieldOpt "metrics_bind_host"
   mp <- getFieldOpt "metrics_port"
+  sr <- getFieldOpt "sample_rate"
   pure PartialTelemetrySection
     { mode           = Last (Control.Monad.join m)
     , serviceName    = Last sn
@@ -106,6 +107,7 @@ telemetryDecoder = do
     , metricsEnabled = Last me
     , metricsBindHost = Last mbh
     , metricsPort    = Last (Just <$> mp)
+    , sampleRate     = Last sr
     }
 
 contextDecoder :: Decoder PartialContextSection

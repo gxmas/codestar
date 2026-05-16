@@ -44,7 +44,7 @@ module Network.JsonRpc.Server.Internal
 
 import Prelude hiding (log)
 
-import Control.Monad.Catch (MonadCatch, SomeException, try)
+import Control.Monad.Catch (MonadCatch, SomeException, throwM, try)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Aeson (ToJSON, Value (..))
 import Data.Aeson qualified as Aeson
@@ -59,7 +59,17 @@ import Network.JsonRpc.Codec (parse, serializeBatch, serializeResponse)
 import Network.JsonRpc.Codec.Internal ()
 import Network.JsonRpc.Server.ParamParser
 import Network.JsonRpc.Types.Internal
-import Telemetry.Core (withSpan, AttributeValue (..), SpanName (..))
+import OTel.Attribute (AttributeValue (..), InstrumentationScope (..))
+import OTel.Context (getCurrent, attach, detach)
+import OTel.Trace
+  ( getGlobalTracerProvider
+  , getTracer
+  , startSpan
+  , end
+  , setSpanInContext
+  , defaultSpanConfig
+  , SpanConfig (..)
+  )
 
 -- ====================================================================
 -- Handler
@@ -191,26 +201,56 @@ handleMessage :: (MonadCatch m, MonadIO m) => Server m -> ServerConfig -> Messag
 handleMessage server _config (MsgRequest req) = do
   let mid = requestId req
       meth = requestMethod req
-  liftIO $ withSpan (SpanName "rpc.server.handle") [("rpc.system", TextValue "jsonrpc"), ("rpc.method", TextValue meth)] (pure ())
-  case lookupHandler server meth of
-    Nothing -> pure (Just (ResponseFailure (Failure (methodNotFound Nothing) mid)))
-    Just h -> do
-      result <- safeRunHandler h (requestParams req)
-      case result of
-        Left err -> pure (Just (ResponseFailure (Failure err mid)))
-        Right val -> pure (Just (ResponseSuccess (Success val mid)))
+  withRpcSpan meth $
+    case lookupHandler server meth of
+      Nothing -> pure (Just (ResponseFailure (Failure (methodNotFound Nothing) mid)))
+      Just h -> do
+        result <- safeRunHandler h (requestParams req)
+        case result of
+          Left err -> pure (Just (ResponseFailure (Failure err mid)))
+          Right val -> pure (Just (ResponseSuccess (Success val mid)))
 handleMessage server _config (MsgNotification notif) = do
   let meth = notificationMethod notif
-  liftIO $ withSpan (SpanName "rpc.server.handle") [("rpc.system", TextValue "jsonrpc"), ("rpc.method", TextValue meth)] (pure ())
-  case lookupHandler server meth of
-    Nothing -> pure Nothing
-    Just h -> do
-      -- Fire and forget. The spec forbids responding to notifications.
-      -- Errors are discarded; use handleRaw (which runs in IO) if you
-      -- need the onError callback.
-      _ <- safeRunHandler h (notificationParams notif)
-      pure Nothing
+  withRpcSpan meth $
+    case lookupHandler server meth of
+      Nothing -> pure Nothing
+      Just h -> do
+        -- Fire and forget. The spec forbids responding to notifications.
+        -- Errors are discarded; use handleRaw (which runs in IO) if you
+        -- need the onError callback.
+        _ <- safeRunHandler h (notificationParams notif)
+        pure Nothing
 handleMessage _ _ (MsgResponse _) = pure Nothing
+
+-- | Start an @rpc.server.handle@ span, run @action@ inside it, then end
+-- the span — whether @action@ returns normally or throws. Uses @try@ +
+-- re-throw rather than @bracket@ so the span-end runs even in monads
+-- that only satisfy 'MonadCatch' (not the stricter 'MonadMask').
+withRpcSpan :: (MonadIO m, MonadCatch m) => Text -> m a -> m a
+withRpcSpan meth action = do
+  (sp, token) <- liftIO $ do
+    provider <- getGlobalTracerProvider
+    tracer   <- getTracer provider rpcScope
+    ctx      <- getCurrent
+    sp       <- startSpan tracer "rpc.server.handle" ctx defaultSpanConfig
+                  { spanAttributes =
+                      [ ("rpc.system", StringValue "jsonrpc")
+                      , ("rpc.method", StringValue meth)
+                      ]
+                  }
+    token <- attach (setSpanInContext sp ctx)
+    pure (sp, token)
+  result <- try action
+  liftIO (detach token >> end sp Nothing)
+  case result of
+    Left  (e :: SomeException) -> throwM e
+    Right v                    -> pure v
+
+rpcScope :: InstrumentationScope
+rpcScope = InstrumentationScope
+  { scopeName = "json-rpc-server", scopeVersion = Nothing
+  , scopeSchemaUrl = Nothing, scopeAttributes = Nothing
+  }
 
 -- | Handle a batch of parsed elements. Returns 'Nothing' if all
 -- elements are notifications (no responses to send).

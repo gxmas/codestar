@@ -9,6 +9,7 @@ import Test.Hspec
 import CodeStar.LLM.Base
 import CodeStar.PlanExecution
 import CodeStar.Planning (PlanStep (..))
+import CodeStar.Telemetry (noOpRecorder)
 import CodeStar.Types (ControlSignal (..), ObjectiveSpec (..), StepId (..), TaskType (..))
 
 spec :: Spec
@@ -31,7 +32,7 @@ spec = describe "CodeStar.PlanExecution" $ do
           n <- readIORef attemptsRef
           pure $ if n < 3 then NeedsInput "retry" else Continue
 
-    signal <- runWithPlan arch planner arch cfg featureSpec Set.empty execute
+    signal <- runWithPlan noOpRecorder arch planner arch cfg featureSpec Set.empty execute
     signal `shouldSatisfy` isDone
     readIORef attemptsRef `shouldReturn` 3
 
@@ -60,7 +61,7 @@ spec = describe "CodeStar.PlanExecution" $ do
     let cfg = defaultPlanExecutionConfig{maxReplans = 2}
         execute _ = modifyIORef' callsRef (+ 1) >> pure Continue
 
-    signal <- runWithPlan arch planner arch cfg featureSpec Set.empty execute
+    signal <- runWithPlan noOpRecorder arch planner arch cfg featureSpec Set.empty execute
     signal `shouldSatisfy` isDone
     readIORef callsRef `shouldReturn` 1
 
@@ -85,7 +86,7 @@ spec = describe "CodeStar.PlanExecution" $ do
           modifyIORef' seenRef (++ [step.stepId])
           pure Continue
 
-    signal <- runWithPlanDag arch planner arch defaultPlanExecutionConfig featureSpec Set.empty execute
+    signal <- runWithPlanDag noOpRecorder arch planner arch defaultPlanExecutionConfig featureSpec Set.empty execute
     signal `shouldSatisfy` isDone
     seen <- readIORef seenRef
     length seen `shouldBe` 2
@@ -107,7 +108,7 @@ scriptedTextClient outputs = do
       { clientInfo = ClientInfo "test" "test-model"
       , complete = \_ -> Right . asResponse <$> popText ref
       , stream = \_ _ -> Right . asResponse <$> popText ref
-      , countTokens = \_ -> pure (Right TokenCount{inputTokens = 0, outputTokens = 0})
+      , countTokens = \_ -> pure (Right TokenCount{inputTokens = 0, outputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0})
       }
 
 popText :: IORef [Text] -> IO Text
@@ -122,7 +123,7 @@ asResponse txt =
   CompletionResponse
     { responseContent = [TextContent txt]
     , stopReason = EndTurn
-    , usage = TokenCount 1 1
+    , usage = TokenCount 1 1 0 0
     }
 
 isDone :: ControlSignal -> Bool

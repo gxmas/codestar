@@ -83,7 +83,7 @@ cliToPartial args =
     (Last Nothing)
     (Last Nothing)
     (PartialServerSection (Last args.cliPort) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing))
-    (PartialTelemetrySection (Last (Just args.cliTelemetry)) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing))
+    (PartialTelemetrySection (Last (Just args.cliTelemetry)) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing))
     mempty
     mempty
     mempty

@@ -80,8 +80,10 @@ doCountTokens client model msgs = do
     Right res ->
       Right
         TokenCount
-          { inputTokens = fromIntegral res.inputTokens
-          , outputTokens = 0
+          { inputTokens         = fromIntegral res.inputTokens
+          , outputTokens        = 0
+          , cacheCreationTokens = 0
+          , cacheReadTokens     = 0
           }
 
 -- --------------------------------------------------------------------
@@ -192,8 +194,10 @@ fromAnthropicResponse res =
     , stopReason = fromAnthropicStopReason res.stopReason
     , usage =
         TokenCount
-          { inputTokens = fromIntegral res.usage.inputTokens
-          , outputTokens = fromIntegral res.usage.outputTokens
+          { inputTokens         = fromIntegral res.usage.inputTokens
+          , outputTokens        = fromIntegral res.usage.outputTokens
+          , cacheCreationTokens = maybe 0 fromIntegral res.usage.cacheCreationInputTokens
+          , cacheReadTokens     = maybe 0 fromIntegral res.usage.cacheReadInputTokens
           }
     }
 

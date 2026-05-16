@@ -64,7 +64,7 @@ library
     , exceptions        >= 0.10
     , anthropic-types
     , anthropic-protocol
-    , telemetry-core
+    , otel-api
 
 executable ergonomics-check
   import:           warnings

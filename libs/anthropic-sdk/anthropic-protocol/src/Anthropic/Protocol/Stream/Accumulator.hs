@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
+{-# LANGUAGE RecordWildCards #-}
 
 -- | Stream event accumulation and ordering validation.
 module Anthropic.Protocol.Stream.Accumulator
@@ -146,19 +146,19 @@ updateLastBlock f (x:xs) = x : updateLastBlock f xs
 -- | Append text to the last text block.
 appendText :: Text -> ContentBlock -> ContentBlock
 appendText t (TextContent tb) =
-  TextContent tb { text = tb.text <> t }
+  let TextBlock{..} = tb in TextContent TextBlock{text = tb.text <> t, ..}
 appendText _ block = block
 
 -- | Append thinking text to the last thinking block.
 appendThinking :: Text -> ContentBlock -> ContentBlock
 appendThinking t (ThinkingContent tb) =
-  ThinkingContent tb { thinking = tb.thinking <> t }
+  let ThinkingBlock{..} = tb in ThinkingContent ThinkingBlock{thinking = tb.thinking <> t, ..}
 appendThinking _ block = block
 
 -- | Finalize tool input by parsing accumulated JSON into the block's input field.
 finalizeToolInput :: Text -> ContentBlock -> ContentBlock
 finalizeToolInput json (ToolUseContent tb) =
   case Aeson.decodeStrict (encodeUtf8 json) of
-    Just v  -> ToolUseContent tb { input = v }
+    Just v  -> let ToolUseBlock{id = toolId, ..} = tb in ToolUseContent ToolUseBlock{id = toolId, input = v, ..}
     Nothing -> ToolUseContent tb
 finalizeToolInput _ block = block

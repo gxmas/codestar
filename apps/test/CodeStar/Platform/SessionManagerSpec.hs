@@ -4,7 +4,7 @@ module CodeStar.Platform.SessionManagerSpec (spec) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (mapConcurrently, mapConcurrently_, replicateConcurrently)
-import Data.List (find, nub, sort)
+import Data.List (find, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text

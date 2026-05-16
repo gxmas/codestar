@@ -25,6 +25,7 @@ import Control.Concurrent.STM
   ( TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, swapTVar
   , writeTVar
   )
+import Control.Exception (displayException)
 import Control.Monad (unless)
 import Data.ByteString qualified as BS
 import Data.Text (Text, pack)
@@ -481,7 +482,8 @@ instance Span SdkSpan where
     ts <- now
     let exAttrs = fromList
           [ ("exception.type", StringValue (pack (show (typeOf exc))))
-          , ("exception.message", StringValue (pack (show exc)))
+          , ("exception.message", StringValue (pack (displayException exc)))
+          , ("exception.stacktrace", StringValue (pack (displayException exc)))
           ]
     addEvent s "exception" (exAttrs <> attrs) (Just ts)
 

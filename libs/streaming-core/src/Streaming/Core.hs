@@ -51,7 +51,18 @@ import Data.UUID (UUID, toText)
 import Data.UUID.V4 (nextRandom)
 import GHC.Generics (Generic)
 
-import Telemetry.Core (Severity (..), log, AttributeValue (..))
+import OTel.Log
+  ( getGlobalLoggerProvider
+  , getLogger
+  , defaultLogRecord
+  , LogBody (..)
+  , SeverityNumber (..)
+  , LogRecord (..)
+  , emit
+  )
+import OTel.Attribute (AttributeValue (..), Attribute, InstrumentationScope (..))
+import OTel.Attribute qualified as OTelAttr
+import OTel.Context (getCurrent)
 
 -- ---------------------------------------------------------------------------
 -- Types
@@ -179,8 +190,8 @@ writeChunk s chunk = do
       _            -> pure WriteClosed
   case result of
     WriteBackpressure ->
-      log WARN "Backpressure triggered"
-        [("stream.id", TextValue (streamIdText s))]
+      logMsg SeverityWarn "Backpressure triggered"
+        [("stream.id", StringValue (streamIdText s))]
     _ -> pure ()
   pure result
 
@@ -257,6 +268,28 @@ splitStream inp predicate = do
 reportProgress :: Stream a -> ProgressUpdate -> IO ()
 reportProgress s update =
   atomically (writeTVar (streamProgress s) (Just update))
+
+
+-- ---------------------------------------------------------------------------
+-- Logging helper
+-- ---------------------------------------------------------------------------
+
+logMsg :: SeverityNumber -> Text -> [Attribute] -> IO ()
+logMsg sev body attrs = do
+  provider <- getGlobalLoggerProvider
+  logger <- getLogger provider InstrumentationScope
+    { scopeName = "streaming-core"
+    , scopeVersion = Nothing
+    , scopeSchemaUrl = Nothing
+    , scopeAttributes = Nothing
+    }
+  ctx <- getCurrent
+  emit logger defaultLogRecord
+    { logSeverityNumber = Just sev
+    , logBody = Just (LogBodyString body)
+    , logAttributes = OTelAttr.fromList attrs
+    , logContext = Just ctx
+    }
 
 -- ---------------------------------------------------------------------------
 -- Internal

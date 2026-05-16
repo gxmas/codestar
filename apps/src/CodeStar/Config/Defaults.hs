@@ -60,6 +60,7 @@ defaultTelemetry = TelemetrySection
   , metricsEnabled = True
   , metricsBindHost = "127.0.0.1"
   , metricsPort    = Just 9100
+  , sampleRate     = 1.0
   }
 
 defaultContext :: ContextSection

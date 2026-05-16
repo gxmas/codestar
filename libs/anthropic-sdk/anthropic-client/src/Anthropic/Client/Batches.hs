@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 -- | Batch API operations.
 module Anthropic.Client.Batches
@@ -38,7 +37,8 @@ import Anthropic.Client.Internal.Execute (executeJsonPost, executeJsonGet, execu
 import Anthropic.Client.Internal.Http (buildGetRequest, baseUrl)
 import Anthropic.Client.Internal.RateLimit (parseRateLimitHeaders, updateRateLimits)
 import Anthropic.Protocol.Batch (BatchItem, BatchResponse, BatchResultItem, DeletedBatch)
-import Telemetry.Core (withSpan, AttributeValue(..))
+import OTel.Trace (withSpan)
+import OTel.Attribute (AttributeValue(..))
 
 -- | Create a new message batch.
 createBatch
@@ -46,7 +46,7 @@ createBatch
   -> [BatchItem]
   -> IO (Either ClientError BatchResponse)
 createBatch client items =
-  withSpan "gen_ai.batch" [("gen_ai.system", TextValue "anthropic")] $
+  withSpan (getClientTracer client) "gen_ai.batch" [("gen_ai.system", StringValue "anthropic")] $
     executeJsonPost client "/v1/messages/batches" (Aeson.object ["requests" .= items])
 
 -- | Retrieve a batch by ID.

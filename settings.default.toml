@@ -1,139 +1,431 @@
-# CodeStar default configuration
+# CodeStar Default Configuration
+# ================================
+# This file documents every setting that can be placed in a CodeStar TOML
+# config file, together with its default value and a description.
 #
-# Copy this file to one of:
-#   $XDG_CONFIG_HOME/codestar/settings.toml   (global, user-level)
-#   <workspace>/.codestar/settings.toml       (project-level, overrides global)
+# Config loading order (later layers override earlier ones):
+#   1. Built-in defaults (shown here)
+#   2. Global config:  ~/.config/codestar/settings.toml
+#   3. Project config: <workspace>/.codestar/settings.toml
+#   4. Environment variables (see "Environment Variables" section below)
+#   5. CLI flags
 #
-# All fields are optional — omitted fields use the defaults shown here.
-# Precedence (lowest to highest): defaults → global → project → env vars → CLI flags
+# Required fields (no default, must be set):
+#   api_key — set via ANTHROPIC_API_KEY or CODESTAR_API_KEY env var.
+#             Not shown in this file because it must never be committed.
+
 
 # ---------------------------------------------------------------------------
-# Models
+# Top-level fields
 # ---------------------------------------------------------------------------
 
-[models]
-architect  = { name = "claude-sonnet-4-20250514",  temperature = 0.7, max_tokens = 8192 }
-coder      = { name = "claude-sonnet-4-20250514",  temperature = 0.0, max_tokens = 8192 }
-validator  = { name = "claude-sonnet-4-20250514",  temperature = 0.0, max_tokens = 4096 }
-summarizer = { name = "claude-haiku-3-5-20241022", temperature = 0.0, max_tokens = 4096 }
+# LLM provider. Currently only "anthropic" is supported.
+# provider = "anthropic"
+
+# Task decomposition strategy.
+#   "none"  — single agent loop, no planning (default)
+#   "list"  — Architect + Planner decompose the task into sequential steps
+#   "dag"   — same as list but steps with no dependencies run in parallel
+# planning_mode = "none"
+
+# Codebase indexing strategy used to build the context window.
+#   "none"    — no index; the repo map is built from tree-sitter on each run (default)
+#   "repomap" — pre-built symbol graph (fastest for repeated runs)
+#   "semantic" — semantic vector index (requires additional setup)
+# index_strategy = "none"
+
+# List of tool names the agent is always allowed to call without guardrail
+# evaluation. Entries here take precedence over deny_list. Stored in the
+# session permission store and persisted across turns.
+# permissions = []
+
 
 # ---------------------------------------------------------------------------
-# Server (WebSocket mode)
+# [models] — LLM model assignments per role
+#
+# Each role maps to a model name, optional sampling parameters, and an
+# optional max_tokens cap. Omitting a field leaves it at the provider default.
+#
+# Roles:
+#   architect  — file selection and plan generation (creative, higher temperature)
+#   coder      — step execution, tool calls (deterministic, temperature 0)
+#   validator  — plan validation and quality checks
+#   summarizer — history compaction (cheap, fast model preferred)
+# ---------------------------------------------------------------------------
+
+[models.architect]
+# name        = "claude-sonnet-4-20250514"
+# temperature = 0.7
+# max_tokens  = 8192
+# top_p       =         # omit to use provider default
+
+[models.coder]
+# name        = "claude-sonnet-4-20250514"
+# temperature = 0.0
+# max_tokens  = 8192
+# top_p       =
+
+[models.validator]
+# name        = "claude-sonnet-4-20250514"
+# temperature = 0.0
+# max_tokens  = 4096
+# top_p       =
+
+[models.summarizer]
+# name        = "claude-haiku-3-5-20241022"
+# temperature = 0.0
+# max_tokens  = 4096
+# top_p       =
+
+
+# ---------------------------------------------------------------------------
+# [server] — WebSocket server (codestar-server binary only)
 # ---------------------------------------------------------------------------
 
 [server]
-port = 8080
-host = "127.0.0.1"
-http_timeout = 3600                  # seconds
-graceful_shutdown_timeout = 30       # seconds
-ping_interval = 30                   # seconds
+
+# TCP port the WebSocket server listens on.
+# Must be 0–65535 and must not conflict with telemetry.metrics_port.
+# port = 8080
+
+# Bind host. Use "0.0.0.0" or "::" to accept connections from all interfaces.
+# host = "127.0.0.1"
+
+# Maximum time in seconds to wait for an HTTP upgrade handshake.
+# http_timeout = 3600
+
+# Seconds to wait for in-flight sessions to finish during graceful shutdown.
+# graceful_shutdown_timeout = 30
+
+# WebSocket ping interval in seconds. Keeps idle connections alive through
+# load balancers and NAT gateways.
+# ping_interval = 30
+
 
 # ---------------------------------------------------------------------------
-# Telemetry
-# ---------------------------------------------------------------------------
-
-[telemetry]
-mode = "otlp"                        # otlp | stderr | off
-service_name = "codestar"
-# Uncomment to export traces to a local OTLP collector (e.g. Jaeger).
-# Use 4318 for HTTP/protobuf (recommended) or 4317 for gRPC.
-# endpoint = "http://localhost:4318"
-log_to_stderr = false
-metrics_enabled = true
-metrics_bind_host = "127.0.0.1"      # bind host for /metrics (use "0.0.0.0" for container scraping)
-metrics_port = 9100                  # Prometheus scrape port
-
-# ---------------------------------------------------------------------------
-# Context window
-# ---------------------------------------------------------------------------
-
-[context]
-max_tokens = 200000
-repo_map_reserve = 4096
-memory_reserve = 2048
-compaction_reserve = 1024
-response_reserve = 8192
-
-# ---------------------------------------------------------------------------
-# Compaction
-# ---------------------------------------------------------------------------
-
-[compaction]
-trigger_fraction = 0.85              # compact when context is this fraction full
-max_context_tokens = 200000
-
-# ---------------------------------------------------------------------------
-# Shell tool
-# ---------------------------------------------------------------------------
-
-[shell]
-default_timeout = 30000             # ms
-max_concurrent = 64
-output_truncation = 50000           # chars
-
-# ---------------------------------------------------------------------------
-# Sessions (server mode)
+# [session] — Per-user session limits (server only)
 # ---------------------------------------------------------------------------
 
 [session]
-max_per_user = 3
-inactivity_timeout = 1800           # seconds
+
+# Maximum number of concurrent agent sessions allowed per user.
+# Additional CmdStart requests are rejected while this limit is reached.
+# max_per_user = 3
+
+# Seconds of inactivity after which a session is automatically terminated.
+# A session is considered inactive when no CmdRespond, CmdApprove, or
+# CmdReject is received within this window.
+# inactivity_timeout = 1800
+
 
 # ---------------------------------------------------------------------------
-# Guardrails
+# [telemetry] — OpenTelemetry traces, metrics, and structured logs
+#
+# Default behaviour: OTLP export enabled, Prometheus metrics on port 9100,
+# 100% sampling. The OTLP endpoint falls back to OTEL_EXPORTER_OTLP_ENDPOINT
+# then to http://localhost:4318 if neither is configured.
 # ---------------------------------------------------------------------------
 
-[guardrails]
-deny_list = ["shell"]
-allow_list = ["read", "glob", "grep", "todo_read", "todo_write"]
-secret_patterns = ["password", "secret", "api_key", "token", "private_key"]
+[telemetry]
+
+# Telemetry output mode.
+#   "otlp"   — export traces and logs via OTLP/HTTP; expose Prometheus metrics (default)
+#   "stderr" — write structured JSON event log to stderr; no OTLP, no Prometheus
+#   "off"    — disable all telemetry
+# mode = "otlp"
+
+# OTel resource attribute service.name, used to identify this deployment
+# in trace backends and Prometheus labels.
+# service_name = "codestar"
+
+# OTLP/HTTP endpoint URL. When unset, the SDK reads OTEL_EXPORTER_OTLP_ENDPOINT
+# from the environment. If that is also unset, it attempts http://localhost:4318.
+# Applies to both the trace and log exporters.
+# endpoint =                   # e.g. "http://otelcol.internal:4318"
+
+# Mirror OTLP log records to stderr in addition to exporting them. Useful
+# for debugging the telemetry pipeline without switching mode to "stderr".
+# log_to_stderr = false
+
+# Controls whether the Prometheus metrics port is included in the startup
+# message printed to stdout. It does NOT stop the Prometheus HTTP server
+# from starting — the server always binds when mode = "otlp". Set this to
+# false to suppress the metrics URL from the startup output only.
+# metrics_enabled = true
+
+# Host the Prometheus metrics server binds to.
+# metrics_bind_host = "127.0.0.1"
+
+# Port the Prometheus metrics server listens on.
+# The server always starts on this port when mode = "otlp", regardless of
+# metrics_enabled. Must not conflict with server.port.
+# metrics_port = 9100
+
+# Trace sampling ratio, 0.0–1.0.
+#   1.0  — AlwaysOnSampler; every trace is recorded (default)
+#   0.0  — no traces recorded
+#   0.x  — TraceIdRatioBasedSampler (head-based); x% of traces kept.
+#           WARNING: head-based sampling discards error traces before they
+#           are identified as errors. Prefer keeping this at 1.0 and apply
+#           tail-based sampling at the collector using the sampling.priority
+#           span attribute.
+# sample_rate = 1.0
+
 
 # ---------------------------------------------------------------------------
-# Budget
+# [context] — Context window budget allocation
+#
+# All values are in tokens. The four reserve values are carved out of
+# max_tokens before any conversation history is allowed in. The remaining
+# space is filled with message history and tool results.
+#
+#   max_tokens
+#     ├── repo_map_reserve    (symbol map injected into system prompt)
+#     ├── memory_reserve      (persistent memory entries)
+#     ├── compaction_reserve  (compaction summary header)
+#     ├── response_reserve    (reserved for the LLM's response)
+#     └── remaining           (conversation history + tool results)
+# ---------------------------------------------------------------------------
+
+[context]
+
+# Total context window size in tokens. Should match or be slightly below
+# the model's actual context limit to leave headroom for tokenisation
+# estimation error (the agent uses a len/4 heuristic).
+# max_tokens = 200000
+
+# Tokens reserved for the repository symbol map injected into the system
+# prompt. The repo map is trimmed to fit this budget.
+# repo_map_reserve = 4096
+
+# Tokens reserved for persistent memory entries loaded at session start.
+# memory_reserve = 2048
+
+# Tokens reserved for the compaction summary prepended to history after
+# a compaction event. Increase if the agent loses important context after
+# compaction.
+# compaction_reserve = 1024
+
+# Tokens reserved for the LLM's response on each call. Passed as
+# max_tokens in the completion request.
+# response_reserve = 8192
+
+
+# ---------------------------------------------------------------------------
+# [compaction] — History compaction settings
+#
+# Compaction runs when the conversation history grows beyond
+# trigger_fraction × max_context_tokens. The Summarizer model condenses
+# the history to reclaim context space. Compaction is lossy: the task
+# description is always preserved, but fine-grained tool output from
+# earlier steps may be lost.
+# ---------------------------------------------------------------------------
+
+[compaction]
+
+# Fraction of max_context_tokens at which compaction is triggered.
+# Must be in (0, 1]. At 0.85, compaction fires when history reaches
+# 85% of the context limit.
+# trigger_fraction = 0.85
+
+# Token budget the compacted history must fit within. Should be well
+# below context.max_tokens so the compacted history plus system prompt
+# comfortably fits in the full context window.
+# max_context_tokens = 200000
+
+
+# ---------------------------------------------------------------------------
+# [shell] — Shell tool configuration
+# ---------------------------------------------------------------------------
+
+[shell]
+
+# Default timeout for shell commands, in milliseconds. Commands that
+# exceed this limit are killed and an error is returned to the agent.
+# default_timeout = 30000
+
+# Maximum number of shell commands that can run concurrently within a
+# single agent session.
+# max_concurrent = 64
+
+# Maximum number of characters captured from a shell command's combined
+# stdout+stderr. Output beyond this limit is truncated before being
+# returned to the agent to avoid filling the context window.
+# output_truncation = 50000
+
+
+# ---------------------------------------------------------------------------
+# [budget] — Token and step limits
 # ---------------------------------------------------------------------------
 
 [budget]
-max_steps = 50
-# session_token_max = 1000000       # uncomment to set a session token limit
-# daily_token_max = 10000000        # uncomment to set a daily token limit
+
+# Maximum number of agent steps per turn. A step is one LLM call plus all
+# the tool executions it requests. The agent is stopped with a "Blocked"
+# signal when this limit is reached.
+# max_steps = 50
+
+# Maximum cumulative input+output tokens per session. When exceeded the
+# session is blocked with a budget exhaustion message. Unset by default
+# (no per-session limit).
+# session_token_max =           # e.g. 1000000
+
+# Maximum cumulative tokens across all sessions in a rolling 24-hour
+# window for a given user. Unset by default (no daily limit).
+# daily_token_max =             # e.g. 5000000
+
 
 # ---------------------------------------------------------------------------
-# Repo map
+# [guardrails] — Tool call policy
+#
+# Every tool call is evaluated before execution. The evaluation order is:
+#   1. If the tool is in the session permission store (pre-approved) → Allow
+#   2. Else if the tool name is in allow_list → Allow
+#   3. Else if the tool name is in deny_list → Deny
+#   4. Else if any argument value matches a secret_pattern → Deny
+#   5. Else → Allow
+#
+# For MCP tools, use the prefixed name: "<endpoint_name>.<tool_name>".
+# ---------------------------------------------------------------------------
+
+[guardrails]
+
+# Tool names that are unconditionally denied. The agent receives the deny
+# reason as a tool error and may attempt an alternative approach.
+# deny_list = ["shell"]
+
+# Tool names that bypass guardrail evaluation and are always allowed.
+# Takes precedence over deny_list.
+# allow_list = ["read", "glob", "grep", "todo_read", "todo_write"]
+
+# Regex patterns matched against tool argument values. A match causes the
+# tool call to be denied regardless of allow_list, protecting against the
+# agent accidentally writing or reading secrets.
+# secret_patterns = ["password", "secret", "api_key", "token", "private_key"]
+
+
+# ---------------------------------------------------------------------------
+# [repomap] — Repository symbol map
+#
+# The repo map is a condensed view of the codebase built from tree-sitter
+# symbol extraction and PageRank-scored relevance. It is injected into the
+# system prompt to orient the LLM within the codebase without requiring it
+# to read every file.
 # ---------------------------------------------------------------------------
 
 [repomap]
-rebuild_interval_ms = 2000
-max_tokens = 4096
-batch_size = 10
+
+# Minimum interval between repo map cache invalidation checks, in
+# milliseconds. Lower values keep the map fresher but increase I/O on
+# large codebases.
+# rebuild_interval_ms = 2000
+
+# Maximum token budget for the repo map. Should be less than or equal to
+# context.repo_map_reserve. Content is trimmed to fit.
+# max_tokens = 4096
+
+# Number of files to process per tree-sitter extraction batch. Lower
+# values reduce peak memory on very large repositories.
+# batch_size = 10
+
 
 # ---------------------------------------------------------------------------
-# Memory
+# [memory] — Persistent per-project memory
+#
+# Memory entries are short facts the agent records across sessions. They
+# are stored as JSON files under <project>/.codestar/memory/ and injected
+# into the system prompt at session start within the memory_reserve budget.
 # ---------------------------------------------------------------------------
 
 [memory]
-enabled = true
-max_entries = 100
-auto_discover = true
+
+# Whether the memory subsystem is active. When false, no entries are
+# loaded or stored regardless of other settings.
+# enabled = true
+
+# Maximum number of memory entries loaded into the system prompt. Older
+# entries are evicted when the limit is reached.
+# max_entries = 100
+
+# When true, the agent automatically discovers and loads memory entries
+# from the project directory at session start.
+# auto_discover = true
+
 
 # ---------------------------------------------------------------------------
-# Index strategy
-# ---------------------------------------------------------------------------
-
-# strategy = "repomap"              # none | repomap | semantic
-
-# ---------------------------------------------------------------------------
-# Planning mode
-# ---------------------------------------------------------------------------
-
-# planning_mode = "none"            # none | list | dag
-
-# ---------------------------------------------------------------------------
-# MCP endpoints
-# ---------------------------------------------------------------------------
-
+# [[mcp]] — MCP (Model Context Protocol) endpoint definitions
+#
+# Each [[mcp]] block registers one external tool server. Tools are exposed
+# with the prefix "<name>.<tool_name>" (e.g. "filesystem.read_file").
+# Endpoints that fail to connect at session startup are skipped with a
+# warning; the session continues without their tools.
+#
+# Fields:
+#   name      — prefix applied to all tool names from this endpoint (required)
+#   transport — "stdio" (spawn subprocess) or "http" (connect to running server)
+#   command   — executable path (stdio) or base URL (http) (required)
+#   args      — command-line arguments (stdio only)
+#   env       — additional environment variables passed to the subprocess
+#
+# Example — GitHub MCP server (official, https://github.com/github/github-mcp-server)
+# Exposes tools for repositories, issues, pull requests, code search, and
+# file operations. Tools are registered as github.create_issue,
+# github.search_code, github.get_pull_request, etc.
+#
+# Requires a GitHub personal access token with appropriate scopes
+# (repo, read:org, etc.). The token can also be supplied via the
+# GITHUB_PERSONAL_ACCESS_TOKEN environment variable instead of inline.
+#
 # [[mcp]]
-# name = "my-tool"
-# command = "python"
-# args = ["/path/to/tool.py"]
+# name      = "github"
 # transport = "stdio"
-# env = { TOOL_KEY = "value" }
+# command   = "docker"
+# args      = ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
+# env       = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_your_token_here" }
+#
+# Alternatively, if the github-mcp-server binary is installed locally:
+#
+# [[mcp]]
+# name      = "github"
+# transport = "stdio"
+# command   = "github-mcp-server"
+# args      = ["stdio"]
+# env       = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_your_token_here" }
+#
+# Example — generic HTTP endpoint (connects to a running server):
+#
+# NOTE: CodeStar's HTTP transport implements the MCP HTTP+SSE protocol
+# (spec <= 2024-11-05). It opens a persistent SSE connection for server→client
+# messages and sends client→server messages via HTTP POST. Servers that use
+# the newer Streamable HTTP transport (spec 2025-03-26) — such as the GitHub
+# MCP server's HTTP mode — are not compatible. Use stdio for those servers.
+#
+# [[mcp]]
+# name      = "my-tools"
+# transport = "http"
+# command   = "http://localhost:8090"
+# args      = []
+# env       = {}
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Environment Variables
+#
+# A subset of settings can be overridden via environment variables. These
+# take precedence over the TOML config but are overridden by CLI flags.
+#
+# Variable                              Overrides
+# ------------------------------------  ------------------------------------
+# ANTHROPIC_API_KEY                     api_key (used if CODESTAR_API_KEY unset)
+# CODESTAR_API_KEY                      api_key (takes priority over ANTHROPIC_API_KEY)
+# CODESTAR_SERVER_PORT                  server.port
+# CODESTAR_TELEMETRY_MODE               telemetry.mode
+# CODESTAR_TELEMETRY_ENDPOINT           telemetry.endpoint
+# CODESTAR_TELEMETRY_METRICS_BIND_HOST  telemetry.metrics_bind_host
+# CODESTAR_TELEMETRY_METRICS_PORT       telemetry.metrics_port
+# CODESTAR_CONTEXT_MAX_TOKENS           context.max_tokens
+# CODESTAR_SHELL_DEFAULT_TIMEOUT        shell.default_timeout
+# CODESTAR_BUDGET_MAX_STEPS             budget.max_steps
+# OTEL_EXPORTER_OTLP_ENDPOINT           telemetry.endpoint (OTel SDK fallback)
+# ---------------------------------------------------------------------------

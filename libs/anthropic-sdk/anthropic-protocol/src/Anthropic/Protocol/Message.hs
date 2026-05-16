@@ -1,9 +1,4 @@
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
--- The with* setters use record update syntax on fields shared across types
--- (cacheControl, container, serviceTier, thinking). The type signature on
--- each setter makes the target type unambiguous, but GHC 9.6+ warns about
--- TDNR deprecation. This pragma suppresses that warning in the defining
--- module only -- consumers use plain functions and never encounter it.
+{-# LANGUAGE RecordWildCards #-}
 
 -- | Message request, response, and convenience constructors.
 module Anthropic.Protocol.Message
@@ -212,55 +207,55 @@ messageRequest model msgs maxTok = MessageRequest
 
 -- | Set the system prompt.
 withSystem :: SystemPrompt -> MessageRequest -> MessageRequest
-withSystem x req = req { system = Just x }
+withSystem x req = let MessageRequest{..} = req in MessageRequest{system = Just x, ..}
 
 -- | Set stop sequences.
 withStopSequences :: [Text] -> MessageRequest -> MessageRequest
-withStopSequences x req = req { stopSequences = Just x }
+withStopSequences x req = let MessageRequest{..} = req in MessageRequest{stopSequences = Just x, ..}
 
 -- | Set the sampling temperature.
 withTemperature :: Double -> MessageRequest -> MessageRequest
-withTemperature x req = req { temperature = Just x }
+withTemperature x req = let MessageRequest{..} = req in MessageRequest{temperature = Just x, ..}
 
 -- | Set the nucleus sampling probability.
 withTopP :: Double -> MessageRequest -> MessageRequest
-withTopP x req = req { topP = Just x }
+withTopP x req = let MessageRequest{..} = req in MessageRequest{topP = Just x, ..}
 
 -- | Set the top-k sampling parameter.
 withTopK :: Int -> MessageRequest -> MessageRequest
-withTopK x req = req { topK = Just x }
+withTopK x req = let MessageRequest{..} = req in MessageRequest{topK = Just x, ..}
 
 -- | Set the tool definitions.
 withTools :: [ToolDefinition] -> MessageRequest -> MessageRequest
-withTools x req = req { tools = Just x }
+withTools x req = let MessageRequest{..} = req in MessageRequest{tools = Just x, ..}
 
 -- | Set the tool choice strategy.
 withToolChoice :: ToolChoice -> MessageRequest -> MessageRequest
-withToolChoice x req = req { toolChoice = Just x }
+withToolChoice x req = let MessageRequest{..} = req in MessageRequest{toolChoice = Just x, ..}
 
 -- | Set the thinking configuration.
 withThinking :: ThinkingConfig -> MessageRequest -> MessageRequest
-withThinking x req = req { thinking = Just x }
+withThinking x req = let MessageRequest{..} = req in MessageRequest{thinking = Just x, ..}
 
 -- | Set the stream flag.
 withStream :: Bool -> MessageRequest -> MessageRequest
-withStream x req = req { stream = Just x }
+withStream x req = let MessageRequest{..} = req in MessageRequest{stream = Just x, ..}
 
 -- | Set request metadata.
 withMetadata :: RequestMetadata -> MessageRequest -> MessageRequest
-withMetadata x req = req { metadata = Just x }
+withMetadata x req = let MessageRequest{..} = req in MessageRequest{metadata = Just x, ..}
 
 -- | Set the service tier preference.
 withServiceTier :: ServiceTierPreference -> MessageRequest -> MessageRequest
-withServiceTier x req = req { serviceTier = Just x }
+withServiceTier x req = let MessageRequest{..} = req in MessageRequest{serviceTier = Just x, ..}
 
 -- | Set the container ID for code execution reuse.
 withContainer :: Text -> MessageRequest -> MessageRequest
-withContainer x req = req { container = Just x }
+withContainer x req = let MessageRequest{..} = req in MessageRequest{container = Just x, ..}
 
 -- | Set the top-level cache breakpoint.
 withCacheControl :: CacheControl -> MessageRequest -> MessageRequest
-withCacheControl x req = req { cacheControl = Just x }
+withCacheControl x req = let MessageRequest{..} = req in MessageRequest{cacheControl = Just x, ..}
 
 -- | Response from the Messages API.
 --

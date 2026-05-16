@@ -34,15 +34,22 @@ module OTel.Trace
   , getSpanFromContext
   , setSpanInContext
   , createNonRecordingSpan
+
+    -- * Convenience bracket
+  , withSpan
   ) where
 
-import Control.Exception (SomeException)
+import Control.Exception
+  ( SomeException, SomeAsyncException, asyncExceptionFromException
+  , catch, displayException, mask, throwIO
+  )
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import System.IO.Unsafe (unsafePerformIO)
 
-import OTel.Attribute (Attribute, AttributeValue, Attributes, InstrumentationScope, Key)
-import OTel.Context (Context, getValue, setValue)
+import OTel.Attribute (Attribute, AttributeValue, Attributes, InstrumentationScope, Key, emptyAttributes)
+import OTel.Context (Context, getValue, setValue, getCurrent, attach, detach)
 import OTel.Context.Key (ContextKey, newContextKey)
 import OTel.Timestamp (Timestamp)
 import OTel.Trace.SpanContext (SpanContext, invalidSpanContext)
@@ -296,3 +303,39 @@ setSpanInContext s ctx = setValue spanContextKey s ctx
 -- Useful for wrapping remotely-propagated context without recording.
 createNonRecordingSpan :: SpanContext -> SomeSpan
 createNonRecordingSpan sc = SomeSpan (NonRecordingSpan sc)
+
+
+-------------------------------------------------------------------------------
+-- Convenience bracket
+-------------------------------------------------------------------------------
+
+-- | Start a span, run the given action in that span's context, and end the
+-- span when the action completes — whether normally or via exception.
+--
+-- The new span becomes the current span for the duration of @action@, so
+-- nested 'withSpan' calls produce a proper parent-child span tree.
+--
+-- On exception the span is marked with 'Error' status and the exception is
+-- recorded as a span event before being re-thrown.
+--
+-- @
+-- withSpan tracer "db.query" [("db.system", StringValue "postgresql")] $ do
+--   runQuery conn q
+-- @
+withSpan :: Tracer t => t -> Text -> [Attribute] -> IO a -> IO a
+withSpan tracer name attrs action = mask $ \restore -> do
+  parentCtx <- getCurrent
+  s <- startSpan tracer name parentCtx
+    defaultSpanConfig { spanAttributes = attrs }
+  token <- attach (setSpanInContext s parentCtx)
+  let cleanup = detach token >> end s Nothing
+  res <- restore action `catch` \(e :: SomeException) -> do
+    case asyncExceptionFromException e of
+      Just (_ :: SomeAsyncException) -> pure ()
+      Nothing -> do
+        setStatus s Error (Just (Text.pack (displayException e)))
+        recordException s e emptyAttributes
+    cleanup
+    throwIO e
+  cleanup
+  pure res

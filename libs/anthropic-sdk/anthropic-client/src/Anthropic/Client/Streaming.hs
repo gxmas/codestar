@@ -1,5 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 -- | Streaming message operations.
 module Anthropic.Client.Streaming
@@ -24,7 +24,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text.Encoding as TE
 import Streaming (Stream, Of)
 import qualified Streaming.Prelude as SP
-import Telemetry.Core (withSpan, AttributeValue(..))
+import OTel.Trace (withSpan)
+import OTel.Attribute (AttributeValue(..))
 
 import Anthropic.Types
 import Anthropic.Client.Config
@@ -107,7 +108,7 @@ streamMessages
   -> (Stream (Of StreamEvent) IO MessageResponse -> IO a)
   -> IO (Either ClientError a)
 streamMessages client msgReq k =
-  withSpan "gen_ai.chat" [("gen_ai.system", TextValue "anthropic")] $ do
+  withSpan (getClientTracer client) "gen_ai.chat" [("gen_ai.system", StringValue "anthropic")] $ do
   let cfg = client.clientConfig
       base = fromMaybe baseUrl (cfg.baseUrl)
       -- Force stream: true in the serialized body
@@ -179,7 +180,7 @@ streamMessagesWith
   -> EventHandler
   -> IO (Either ClientError MessageResponse)
 streamMessagesWith client msgReq handler =
-  withSpan "gen_ai.chat" [("gen_ai.system", TextValue "anthropic")] $
+  withSpan (getClientTracer client) "gen_ai.chat" [("gen_ai.system", StringValue "anthropic")] $
   streamMessages client msgReq $ \stream -> do
     -- Fold over the stream, dispatching events to the handler
     -- and accumulating stream state
@@ -198,13 +199,17 @@ streamMessagesWith client msgReq handler =
 
     -- Build the final MessageResponse from accumulated state
     let assembled = case finalMsg of
-          Just msg -> msg
-            { content    = accumulatedBlocks finalState
-            , stopReason = case finalState of
-                _ | streamPhase finalState == StreamDone ->
-                    finalMsg >>= (.stopReason)
-                _ -> Nothing
-            }
+          Just msg ->
+            let MessageResponse{id = msgId, ..} = msg
+            in MessageResponse
+                { id         = msgId
+                , content    = accumulatedBlocks finalState
+                , stopReason = case finalState of
+                    _ | streamPhase finalState == StreamDone ->
+                        finalMsg >>= (.stopReason)
+                    _ -> Nothing
+                , ..
+                }
           Nothing -> error "streamMessagesWith: stream ended without message_start"
 
     handler.onMessageComplete assembled

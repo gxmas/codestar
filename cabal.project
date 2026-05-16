@@ -29,7 +29,15 @@ packages:
   libs/resilience
   libs/storage-core
   libs/streaming-core
-  libs/telemetry-core
+  libs/otel/otel-api
+  libs/otel/otel-sdk-common
+  libs/otel/otel-sdk-traces
+  libs/otel/otel-sdk-metrics
+  libs/otel/otel-sdk-logs
+  libs/otel/otel-exporter-otlp-grpc
+  libs/otel/otel-exporter-otlp-http
+  libs/otel/otel-exporter-prometheus
+  libs/otel/otel-proto
 
   libs/tree-sitter
   libs/openai-sdk

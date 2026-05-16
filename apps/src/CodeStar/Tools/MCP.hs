@@ -3,6 +3,7 @@ module CodeStar.Tools.MCP
   ) where
 
 import Control.Exception (IOException, try)
+import GHC.Clock (getMonotonicTimeNSec)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
@@ -19,17 +20,29 @@ import Network.MCP.Transport (Transport)
 import Network.MCP.Transport.Http qualified as Http
 import Network.MCP.Transport.Stdio qualified as Stdio
 import Network.MCP.Types (Implementation (..), RPCError (..))
-import Network.MCP.Types.Content
-  ( ContentBlock (..)
-  , ResourceLink (..)
-  , TextContent (..)
+import Network.MCP.Types.Content (ContentBlock (..), ResourceLink (..), TextContent (..))
+
+import OTel.Attribute (AttributeValue (..))
+import OTel.Log
+  ( getGlobalLoggerProvider
+  , getLogger
+  , defaultLogRecord
+  , LogBody (..)
+  , SeverityNumber (..)
+  , LogRecord (..)
+  , emit
   )
+import OTel.Attribute qualified as OTelAttr
+import OTel.Context (getCurrent)
 
 import Data.JsonSchema.Schema.Internal (emptySchema)
 import Data.JsonSchema.Serialization (decode)
 
 import CodeStar.Config (McpEndpoint (..), McpTransport (..))
 import CodeStar.LLM.Base (ToolName (..))
+import OTel.Attribute (InstrumentationScope (..))
+import CodeStar.Telemetry (TelemetryRecorder (..))
+import CodeStar.Telemetry qualified as Tel
 import CodeStar.Tools.Registry
 
 -- --------------------------------------------------------------------
@@ -41,44 +54,60 @@ for each discovered tool. Tools are prefixed with the endpoint name
 to avoid name collisions (e.g., "filesystem.read_file").
 Endpoints that fail to connect are skipped with a warning.
 -}
-connectMcpEndpoints :: [McpEndpoint] -> IO [ToolHandlerDict]
-connectMcpEndpoints [] = pure []
-connectMcpEndpoints endpoints = do
-  results <- mapM connectOne endpoints
+connectMcpEndpoints :: TelemetryRecorder -> [McpEndpoint] -> IO [ToolHandlerDict]
+connectMcpEndpoints _ [] = pure []
+connectMcpEndpoints tel endpoints = do
+  results <- mapM (connectOne tel) endpoints
   pure (concat [hs | Just hs <- results])
 
 -- --------------------------------------------------------------------
 -- Per-endpoint connection
 -- --------------------------------------------------------------------
 
-connectOne :: McpEndpoint -> IO (Maybe [ToolHandlerDict])
-connectOne ep = do
+connectOne :: TelemetryRecorder -> McpEndpoint -> IO (Maybe [ToolHandlerDict])
+connectOne tel ep = do
   sessionResult <- openSession ep
   case sessionResult of
     Left err -> do
-      putStrLn ("[MCP] Failed to connect to " <> Text.unpack ep.endpointName <> ": " <> err)
+      logMcp SeverityWarn "mcp.connect.failed"
+        [ ("mcp.endpoint",  StringValue ep.endpointName)
+        , ("error.message", StringValue (Text.pack err))
+        ]
       pure Nothing
     Right session -> do
       toolsResult <- MCPTools.listTools session
       case toolsResult of
         Left err -> do
-          putStrLn
-            ( "[MCP] tools/list failed for "
-                <> Text.unpack ep.endpointName
-                <> ": "
-                <> Text.unpack err.rpcErrorMessage
-            )
+          logMcp SeverityWarn "mcp.connect.failed"
+            [ ("mcp.endpoint",  StringValue ep.endpointName)
+            , ("error.message", StringValue err.rpcErrorMessage)
+            ]
           pure Nothing
         Right defs -> do
-          putStrLn
-            ( "[MCP] Connected to "
-                <> Text.unpack ep.endpointName
-                <> " — "
-                <> show (length defs)
-                <> " tools discovered"
-            )
-          handlers <- mapM (mkHandler session ep.endpointName) defs
+          logMcp SeverityInfo "mcp.connect.success"
+            [ ("mcp.endpoint",  StringValue ep.endpointName)
+            , ("tool_count",    Int64Value (fromIntegral (length defs)))
+            ]
+          handlers <- mapM (mkHandler tel session ep.endpointName) defs
           pure (Just handlers)
+
+logMcp :: SeverityNumber -> Text -> [(Text, AttributeValue)] -> IO ()
+logMcp severity body attrs = do
+  let scope = InstrumentationScope
+        { scopeName = "codestar"
+        , scopeVersion = Nothing
+        , scopeSchemaUrl = Nothing
+        , scopeAttributes = Nothing
+        }
+  loggerProvider <- getGlobalLoggerProvider
+  logger         <- getLogger loggerProvider scope
+  ctx            <- getCurrent
+  emit logger defaultLogRecord
+    { logSeverityNumber = Just severity
+    , logBody           = Just (LogBodyString body)
+    , logAttributes     = OTelAttr.fromList attrs
+    , logContext        = Just ctx
+    }
 
 openSession :: McpEndpoint -> IO (Either String Session)
 openSession ep = do
@@ -121,8 +150,8 @@ codestarImpl =
 -- Tool handler construction
 -- --------------------------------------------------------------------
 
-mkHandler :: Session -> Text -> ClientToolDef -> IO ToolHandlerDict
-mkHandler session epName def = do
+mkHandler :: TelemetryRecorder -> Session -> Text -> ClientToolDef -> IO ToolHandlerDict
+mkHandler tel session epName def = do
   let prefixedName = ToolName (epName <> "." <> def.ctdName)
       schema = either (const emptySchema) id (decode def.ctdInputSchema)
       description = maybe def.ctdName id def.ctdDescription
@@ -136,21 +165,44 @@ mkHandler session epName def = do
   pure
     ToolHandlerDict
       { definition = toolDef
-      , invoke = invokeMcpTool session def.ctdName
+      , invoke = invokeMcpTool tel session epName def.ctdName
       }
 
-invokeMcpTool :: Session -> Text -> ToolInput -> IO (Either ToolError ToolOutput)
-invokeMcpTool session toolName input = do
+invokeMcpTool :: TelemetryRecorder -> Session -> Text -> Text -> ToolInput -> IO (Either ToolError ToolOutput)
+invokeMcpTool tel session epName toolName input = do
   let args = inputToValue input
+  mcpSpan <- tel.startSpan "mcp.tool_call"
+    [ ("mcp.endpoint",  StringValue epName)
+    , ("mcp.tool_name", StringValue toolName)
+    ]
+  t0 <- getMonotonicTimeNSec
   result <- MCPTools.callTool session toolName args
+  t1 <- getMonotonicTimeNSec
+  let durMs = fromIntegral ((t1 - t0) `div` 1_000_000) :: Double
   case result of
-    Left err ->
+    Left err -> do
+      tel.setSpanError mcpSpan err.rpcErrorMessage
+      tel.endSpan mcpSpan
+      tel.recordEvent Tel.EvMcpCall
+        { Tel.mcEndpoint  = epName
+        , Tel.mcToolName  = toolName
+        , Tel.mcDurationMs = durMs
+        , Tel.mcSuccess   = False
+        }
       pure (Left (ExecutionFailed err.rpcErrorMessage))
-    Right tcr ->
+    Right tcr -> do
       let content = foldMap renderBlock tcr.tcrContent
-       in if tcr.tcrIsError
-            then pure (Left (ExecutionFailed content))
-            else pure (Right ToolOutput{content = content, truncated = False})
+          isErr = tcr.tcrIsError
+      tel.endSpan mcpSpan
+      tel.recordEvent Tel.EvMcpCall
+        { Tel.mcEndpoint  = epName
+        , Tel.mcToolName  = toolName
+        , Tel.mcDurationMs = durMs
+        , Tel.mcSuccess   = not isErr
+        }
+      if isErr
+        then pure (Left (ExecutionFailed content))
+        else pure (Right ToolOutput{content = content, truncated = False})
 
 inputToValue :: ToolInput -> Value
 inputToValue input =

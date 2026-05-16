@@ -3,7 +3,10 @@ module Main where
 import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
-import Control.Exception (SomeException, catch, finally, try)
+import Control.Exception (SomeException, bracket_, catch, finally, mask, try)
+import GHC.Clock (getMonotonicTimeNSec)
+import Control.Monad (void)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Control.Monad (forM)
 import Data.ByteString qualified as BS
 import Data.List (isPrefixOf)
@@ -48,7 +51,7 @@ import CodeStar.Context (ContextParts (..), assemble)
 import CodeStar.Context qualified as CC
 import CodeStar.Guardrails qualified as GR
 import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (buildResolver)
+import CodeStar.LLM.Base (LlmError (..), buildResolver, withRetry)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
 import CodeStar.Platform.Auth (AuthConfig (..), AuthResult (..), Identity (..), authenticate)
@@ -69,14 +72,18 @@ import CodeStar.RepoMap.Graph (buildSymbolGraph, defaultWeights, extractTags, pa
 import CodeStar.RepoMap.Render (defaultRenderConfig, renderRepoMap)
 import CodeStar.RepoMap.Render qualified as RepoMap
 import CodeStar.Storage (newBackend)
+import OTel.Attribute (AttributeValue (..))
+import OTel.Context (getCurrent, attach, detach)
 import CodeStar.Telemetry
   ( OtelSettings (..)
-  , TelemetryRecorder
+  , TelemetryRecorder (..)
   , jsonRecorder
   , noOpRecorder
   , otlpRecorderWithHandle
   , shutdownTelemetry
+  , signalLabel
   )
+import CodeStar.Telemetry qualified as Tel
 import CodeStar.Tools.Edit (editToolHandler)
 import CodeStar.Tools.Glob (globToolHandler)
 import CodeStar.Tools.Grep (grepToolHandler)
@@ -94,7 +101,8 @@ import CodeStar.Transport.Types
   )
 import CodeStar.Transport.WebSocket (websocketRecv, websocketSend)
 import CodeStar.TreeSitter (GrammarRegistry, loadGrammarRegistry)
-import CodeStar.Types ()
+import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
+import Resilience.Core (defaultRecoveryPolicy, newRecoveryEngine)
 
 -- --------------------------------------------------------------------
 -- Entry point
@@ -164,8 +172,9 @@ makeWsApp config recorder sessionMgr shutdownVar pending = do
           authCfg = NoAuthConfig
       authResult <- authenticate authCfg (maybe "" id token)
       case authResult of
-        Unauthenticated reason ->
+        Unauthenticated reason -> do
           WS.rejectRequest pending (TE.encodeUtf8 reason)
+            `finally` void (try @SomeException (recorder.recordEvent Tel.EvAuthRejected{ Tel.rejectionReason = reason }))
         Authenticated identity -> do
           conn <- WS.acceptRequest pending
           WS.withPingThread conn 30 (pure ()) $
@@ -187,18 +196,46 @@ extractBearerFromHeaders headers =
 
 handleConnection :: AgentConfig -> TelemetryRecorder -> SessionManager -> Identity -> WS.Connection -> IO ()
 handleConnection config recorder sessionMgr identity conn = do
+  let UserId uid = identity.userId
+  connSpan <- recorder.startSpan "ws.connection" [("user.id", StringValue uid)]
+  recorder.recordEvent Tel.EvWsConnectionOpen { Tel.wcoUserId = uid }
+  t0conn <- getMonotonicTimeNSec
+  let endConn = do
+        t1conn <- getMonotonicTimeNSec
+        let durMs = fromIntegral ((t1conn - t0conn) `div` 1_000_000) :: Double
+        recorder.endSpan connSpan
+        recorder.recordEvent Tel.EvWsConnection { Tel.wcUserId = uid, Tel.wcDurationMs = durMs }
   let sendBytes = websocketSend conn
       recvBytes = websocketRecv conn
 
   transport <- jsonRpcTransport sendBytes recvBytes
 
-  transport.onCommand $ \cmd ->
-    handleCommand config recorder sessionMgr identity conn cmd
+  transport.onCommand $ \cmd -> do
+    cmdType <- pure (commandType cmd)
+    t0cmd <- getMonotonicTimeNSec
+    cmdSpan <- recorder.startSpan "ws.command"
+      [ ("command.type", StringValue cmdType)
+      , ("user.id",      StringValue uid)
+      ]
+    result <- handleCommand config recorder sessionMgr identity conn cmd
+    t1cmd <- getMonotonicTimeNSec
+    let cmdDurMs = fromIntegral ((t1cmd - t0cmd) `div` 1_000_000) :: Double
+        success  = case result of { CmdErr _ -> False; _ -> True }
+    recorder.endSpan cmdSpan
+    recorder.recordEvent Tel.EvWsCommand
+      { Tel.wccCommandType = cmdType
+      , Tel.wccSessionId   = commandSessionId cmd
+      , Tel.wccUserId      = uid
+      , Tel.wccDurationMs  = cmdDurMs
+      , Tel.wccSuccess     = success
+      }
+    pure result
 
-  transport.listen
+  (transport.listen
     `catch` ( \(ex :: SomeException) ->
                 Text.IO.hPutStrLn stderr ("[server] connection error: " <> Text.pack (show ex))
-            )
+            ))
+    `finally` endConn
 
 -- --------------------------------------------------------------------
 -- Command dispatch
@@ -220,7 +257,18 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
       Left err -> pure (CmdErr err)
       Right session -> do
         let ApiKey key = config.apiKey
-        resolver <- buildResolver config.modelRoles (newAnthropicClient key)
+        baseResolver <- buildResolver config.modelRoles (newAnthropicClient key)
+        resEngine <- newRecoveryEngine defaultRecoveryPolicy
+        let SessionId sid0 = session.sessionId
+            onRetry err attempt = recorder.recordEvent Tel.EvLlmRetry
+              { Tel.retryError       = llmErrorLabel err
+              , Tel.retryAttempt     = attempt
+              , Tel.retryAfterHintMs = case err of
+                  RateLimited secs -> round (secs * 1000)
+                  _                -> 0
+              , Tel.lrSessionId      = sid0
+              }
+            resolver = \role -> withRetry resEngine onRetry (baseResolver role)
         tracker <- newReadTracker
         todoStore <- newTodoStore
         globalCfgDir <- Paths.globalConfigDir
@@ -240,7 +288,7 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
         repoMapText <- buildRepoMapSafe grammarReg repoCache config.workspacePath
 
         let sandbox = noSandbox config.workspacePath
-        mcpHandlers <- connectMcpEndpoints config.mcpEndpoints
+        mcpHandlers <- connectMcpEndpoints recorder config.mcpEndpoints
         let onEdit = Just (repoCache.invalidate)
             registry = foldr register (buildRegistry tracker todoStore sandbox onEdit) mcpHandlers
 
@@ -303,14 +351,64 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
                 , envWaitForApproval = Just waitApproval
                 }
 
+        -- Capture the active OTel context before forking so agent.turn is
+        -- parented under ws.command. async() starts a new thread whose
+        -- context stack is empty; we must hand the parent context across.
+        parentCtx <- getCurrent
         thread <- async $ do
-          result <- try (runAgent env sysPrompt task)
-          case result of
-            Right signal -> atomically $ writeTVar session.status (SCompleted signal)
-            Left (ex :: SomeException) -> do
-              let msg = Text.pack (show ex)
-              eventSinkFn (AgentEventEnvelope session.sessionId (AgentError msg))
-              atomically $ writeTVar session.status STerminated
+          ctxToken <- attach parentCtx
+          let SessionId sid = session.sessionId
+              UserId uid = identity.userId
+          terminationReasonRef <- newIORef "cancelled"
+          let terminateWith reason = writeIORef terminationReasonRef reason
+          (`finally` detach ctxToken) $
+            bracket_
+              (recorder.adjustSessionCount 1)
+              (do reason <- readIORef terminationReasonRef
+                  recorder.adjustSessionCount (-1)
+                  recorder.recordEvent Tel.EvSessionTerminated
+                    { Tel.sessionId = sid
+                    , Tel.userId    = uid
+                    , Tel.terminationReason = reason
+                    })
+              (do recorder.recordEvent Tel.EvSessionCreated
+                    { Tel.sessionId = sid
+                    , Tel.userId    = uid
+                    }
+                  -- mask ensures no async exception can arrive between
+                  -- startSpan returning and finally installing endSpan.
+                  mask $ \restore -> do
+                    spanResult <- restore $ try (recorder.startSpan "agent.turn"
+                      [ ("session.id", StringValue sid)
+                      , ("user.id",    StringValue uid)
+                      , ("task",       StringValue (Text.take 200 task))
+                      ])
+                    case spanResult of
+                      Left (spanEx :: SomeException) -> do
+                        terminateWith "error"
+                        eventSinkFn (AgentEventEnvelope session.sessionId
+                          (AgentError ("Telemetry init failed: " <> Text.pack (show spanEx))))
+                        atomically $ writeTVar session.status STerminated
+                      Right rootSpan ->
+                        restore (do
+                          result <- try (runAgent env sysPrompt task)
+                          case result of
+                            Right signal -> do
+                              terminateWith (signalLabel signal)
+                              recorder.setSpanAttr rootSpan "outcome" (signalLabel signal)
+                              -- Force-sample blocked sessions for collector-level tail sampling
+                              case signal of
+                                Blocked _ -> recorder.setSpanAttr rootSpan "sampling.priority" "1"
+                                _         -> pure ()
+                              atomically $ writeTVar session.status (SCompleted signal)
+                            Left (ex :: SomeException) -> do
+                              terminateWith "error"
+                              let msg = Text.pack (show ex)
+                              recorder.setSpanError rootSpan msg
+                              recorder.setSpanAttr rootSpan "sampling.priority" "1"
+                              eventSinkFn (AgentEventEnvelope session.sessionId (AgentError msg))
+                              atomically $ writeTVar session.status STerminated)
+                        `finally` recorder.endSpan rootSpan)
         atomically $ writeTVar session.workerThread (Just thread)
 
         pure CmdOk
@@ -325,6 +423,34 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
   CmdStop{sessionId = sid} -> do
     sessionMgr.destroy sid
     pure CmdOk
+
+-- --------------------------------------------------------------------
+-- Command helpers
+-- --------------------------------------------------------------------
+
+commandType :: Command -> Text
+commandType CmdStart{}   = "start"
+commandType CmdRespond{} = "respond"
+commandType CmdApprove{} = "approve"
+commandType CmdReject{}  = "reject"
+commandType CmdCompact{} = "compact"
+commandType CmdStop{}    = "stop"
+
+commandSessionId :: Command -> Text
+commandSessionId cmd = let SessionId s = cmd.sessionId in s
+
+-- --------------------------------------------------------------------
+-- LLM error labels (mirrored from CLI.hs)
+-- --------------------------------------------------------------------
+
+llmErrorLabel :: LlmError -> Text
+llmErrorLabel (RateLimited _)         = "RateLimited"
+llmErrorLabel (AuthenticationFailed _) = "AuthenticationFailed"
+llmErrorLabel (ContextTooLong _ _)    = "ContextTooLong"
+llmErrorLabel (ContentFiltered _)     = "ContentFiltered"
+llmErrorLabel (InvalidRequest _)      = "InvalidRequest"
+llmErrorLabel (ProviderError _)       = "ProviderError"
+llmErrorLabel (NetworkError _)        = "NetworkError"
 
 -- --------------------------------------------------------------------
 -- Shared utilities (mirrored from CLI.hs)
@@ -365,6 +491,9 @@ mkRecorder tel = case tel.mode of
           , metricsEnabled = tel.metricsEnabled
           , metricsBindHost = tel.metricsBindHost
           , metricsPort = tel.metricsPort
+          , sessionId = Nothing
+          , userId = Nothing
+          , tracesSampleRate = tel.sampleRate
           }
     pure (recorder, shutdownTelemetry handle)
 

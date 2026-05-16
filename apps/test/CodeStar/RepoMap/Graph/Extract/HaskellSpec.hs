@@ -6,7 +6,6 @@ import Data.ByteString qualified as BS
 import Data.List (nub)
 import Data.Text qualified as Text
 import Test.Hspec
-import Test.Hspec.QuickCheck
 import Test.QuickCheck
 import Test.QuickCheck.Monadic (assert, monadicIO, run)
 

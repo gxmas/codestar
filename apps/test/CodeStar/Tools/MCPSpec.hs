@@ -4,12 +4,13 @@ import Data.Map.Strict qualified as Map
 import Test.Hspec
 
 import CodeStar.Config (McpEndpoint (..), McpTransport (..))
+import CodeStar.Telemetry (noOpRecorder)
 import CodeStar.Tools.MCP (connectMcpEndpoints)
 
 spec :: Spec
 spec = describe "CodeStar.Tools.MCP" $ do
   it "returns empty list for empty endpoint config" $ do
-    handlers <- connectMcpEndpoints []
+    handlers <- connectMcpEndpoints noOpRecorder []
     length handlers `shouldBe` 0
 
   it "skips endpoints that fail to connect" $ do
@@ -21,7 +22,7 @@ spec = describe "CodeStar.Tools.MCP" $ do
             , env = Map.empty
             , transport = StdioTransport
             }
-    handlers <- connectMcpEndpoints [badEp]
+    handlers <- connectMcpEndpoints noOpRecorder [badEp]
     length handlers `shouldBe` 0
 
   it "fails gracefully for unreachable HTTP transport endpoints" $ do
@@ -33,5 +34,5 @@ spec = describe "CodeStar.Tools.MCP" $ do
             , env = Map.empty
             , transport = HttpTransport
             }
-    handlers <- connectMcpEndpoints [badHttp]
+    handlers <- connectMcpEndpoints noOpRecorder [badHttp]
     length handlers `shouldBe` 0

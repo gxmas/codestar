@@ -26,6 +26,9 @@ module Anthropic.Client.Config
     -- * Error Type
   , ClientError (..)
 
+    -- * Tracer
+  , getClientTracer
+
     -- * Rate Limit Observability
   , getRateLimits
   ) where
@@ -41,6 +44,9 @@ import Anthropic.Types
 
 import Anthropic.Client.Internal.RateLimit
   ( newRateLimitState, readRateLimits )
+
+import OTel.Trace (SomeTracer, getGlobalTracerProvider, getTracer)
+import OTel.Attribute (InstrumentationScope(..))
 
 -- | Retry policy for failed requests.
 data RetryPolicy = RetryPolicy
@@ -164,6 +170,7 @@ data AnthropicClient = AnthropicClient
   { clientConfig      :: !ClientConfig
   , clientManager     :: !Manager
   , clientRateLimits  :: !(TVar (Maybe RateLimitInfo))
+  , clientTracer      :: !SomeTracer
   }
 
 -- | Create a new client. The client maintains an HTTP connection pool
@@ -175,10 +182,18 @@ newClient :: ClientConfig -> IO AnthropicClient
 newClient cfg = do
   mgr <- newTlsManager
   rlState <- newRateLimitState
+  provider <- getGlobalTracerProvider
+  tracer <- getTracer provider InstrumentationScope
+    { scopeName       = "anthropic-client"
+    , scopeVersion    = Nothing
+    , scopeSchemaUrl  = Nothing
+    , scopeAttributes = Nothing
+    }
   pure AnthropicClient
     { clientConfig     = cfg
     , clientManager    = mgr
     , clientRateLimits = rlState
+    , clientTracer     = tracer
     }
 
 -- | Close a client, releasing its connection pool.
@@ -210,6 +225,10 @@ data ClientError
     -- ^ Response body could not be parsed. Includes the error message
     -- and the raw bytes for debugging.
   deriving stock (Show)
+
+-- | Get the tracer for instrumentation.
+getClientTracer :: AnthropicClient -> SomeTracer
+getClientTracer (AnthropicClient { clientTracer = t }) = t
 
 -- | Get the last-seen rate limit information.
 --

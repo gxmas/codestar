@@ -2,6 +2,7 @@ module Main where
 
 import Test.Hspec
 
+import CodeStar.AgentTelemetrySpec qualified
 import CodeStar.AgentLoopSpec qualified
 import CodeStar.CompactionSpec qualified
 import CodeStar.Config.DefaultsSpec qualified
@@ -18,6 +19,8 @@ import CodeStar.ConfigSpec qualified
 import CodeStar.ContextSpec qualified
 import CodeStar.GuardrailsSpec qualified
 import CodeStar.HistorySpec qualified
+import CodeStar.LlmRetrySpec qualified
+import CodeStar.LlmRetryFieldSpec qualified
 import CodeStar.LLM.AnthropicSpec qualified
 import CodeStar.LLM.BaseSpec qualified
 import CodeStar.LLM.OllamaSpec qualified
@@ -26,6 +29,8 @@ import CodeStar.LocalizationSpec qualified
 import CodeStar.MemorySpec qualified
 import CodeStar.PermissionsSpec qualified
 import CodeStar.PlanExecutionSpec qualified
+import CodeStar.PlanTelemetrySpec qualified
+import CodeStar.PlanTelemetryExtraSpec qualified
 import CodeStar.PlanningSpec qualified
 import CodeStar.Platform.AuthSpec qualified
 import CodeStar.Platform.CostTrackerSpec qualified
@@ -41,10 +46,16 @@ import CodeStar.RepoMap.Graph.ExtractSpec qualified
 import CodeStar.RepoMap.GraphSpec qualified
 import CodeStar.RepoMap.RenderSpec qualified
 import CodeStar.RepoMap.WorkerSpec qualified
+import CodeStar.SamplingSpec qualified
 import CodeStar.SemanticSearchSpec qualified
 import CodeStar.SignalSpec qualified
+import CodeStar.SpanAttributeSpec qualified
 import CodeStar.StorageSpec qualified
+import CodeStar.ServerSpanSafetySpec qualified
+import CodeStar.SessionLifecycleSpec qualified
 import CodeStar.TelemetrySpec qualified
+import CodeStar.TelemetrySpanSpec qualified
+import OTel.ContextThreadSpec qualified
 import CodeStar.Tools.EditSpec qualified
 import CodeStar.Tools.GitSpec qualified
 import CodeStar.Tools.GlobSpec qualified
@@ -66,6 +77,7 @@ import CodeStar.VerificationSpec qualified
 
 main :: IO ()
 main = hspec $ do
+  CodeStar.AgentTelemetrySpec.spec
   CodeStar.AgentLoopSpec.spec
   CodeStar.CompactionSpec.spec
   CodeStar.Config.DefaultsSpec.spec
@@ -82,6 +94,8 @@ main = hspec $ do
   CodeStar.ContextSpec.spec
   CodeStar.GuardrailsSpec.spec
   CodeStar.HistorySpec.spec
+  CodeStar.LlmRetrySpec.spec
+  CodeStar.LlmRetryFieldSpec.spec
   CodeStar.LLM.AnthropicSpec.spec
   CodeStar.LLM.BaseSpec.spec
   CodeStar.LLM.OllamaSpec.spec
@@ -90,6 +104,8 @@ main = hspec $ do
   CodeStar.MemorySpec.spec
   CodeStar.PermissionsSpec.spec
   CodeStar.PlanExecutionSpec.spec
+  CodeStar.PlanTelemetrySpec.spec
+  CodeStar.PlanTelemetryExtraSpec.spec
   CodeStar.PlanningSpec.spec
   CodeStar.Platform.AuthSpec.spec
   CodeStar.Platform.CostTrackerSpec.spec
@@ -105,10 +121,16 @@ main = hspec $ do
   CodeStar.RepoMap.GraphSpec.spec
   CodeStar.RepoMap.RenderSpec.spec
   CodeStar.RepoMap.WorkerSpec.spec
+  CodeStar.SamplingSpec.spec
   CodeStar.SemanticSearchSpec.spec
   CodeStar.SignalSpec.spec
+  CodeStar.SpanAttributeSpec.spec
   CodeStar.StorageSpec.spec
+  CodeStar.ServerSpanSafetySpec.spec
+  CodeStar.SessionLifecycleSpec.spec
   CodeStar.TelemetrySpec.spec
+  CodeStar.TelemetrySpanSpec.spec
+  OTel.ContextThreadSpec.spec
   CodeStar.Tools.EditSpec.spec
   CodeStar.Tools.GitSpec.spec
   CodeStar.Tools.GlobSpec.spec

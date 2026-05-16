@@ -33,7 +33,7 @@ newCompatibleClient apiKey modelId baseUrl = do
       { clientInfo = ClientInfo "openai" modelId
       , complete = doComplete client modelId
       , stream = doStream client modelId
-      , countTokens = \_ -> pure (Right (TokenCount 0 0))
+      , countTokens = \_ -> pure (Right (TokenCount 0 0 0 0))
       }
 
 doComplete :: OAI.OpenAIClient -> Text -> CompletionRequest -> IO (Either LlmError CompletionResponse)
@@ -58,7 +58,7 @@ doStream client modelId req onEvent = do
         CompletionResponse
           { responseContent = []
           , stopReason = EndTurn
-          , usage = TokenCount 0 0
+          , usage = TokenCount 0 0 0 0
           }
 
 handleChunk :: (CompletionEvent -> IO ()) -> OT.StreamChunk -> IO ()
@@ -117,7 +117,7 @@ fromOAIResponse res =
   CompletionResponse
     { responseContent = concatMap fromChoice res.choices
     , stopReason = maybe EndTurn fromFinish (head' res.choices >>= (.finishReason))
-    , usage = maybe (TokenCount 0 0) fromUsage res.usage
+    , usage = maybe (TokenCount 0 0 0 0) fromUsage res.usage
     }
 
 fromChoice :: OT.Choice -> [Content]
@@ -135,8 +135,10 @@ fromFinish = \case
 fromUsage :: OT.Usage -> TokenCount
 fromUsage u =
   TokenCount
-    { inputTokens = fromIntegral u.promptTokens
-    , outputTokens = fromIntegral u.completionTokens
+    { inputTokens         = fromIntegral u.promptTokens
+    , outputTokens        = fromIntegral u.completionTokens
+    , cacheCreationTokens = 0
+    , cacheReadTokens     = 0
     }
 
 head' :: [a] -> Maybe a

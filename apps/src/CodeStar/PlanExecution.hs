@@ -6,8 +6,12 @@ module CodeStar.PlanExecution
     -- * Config
   , PlanExecutionConfig (..)
   , defaultPlanExecutionConfig
+
+    -- * Internal (exported for testing)
+  , wrapExceptionsRaw
   ) where
 
+import Control.Exception (IOException, try)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -36,6 +40,9 @@ import CodeStar.Planning
   , fingerprintPlan
   , validatePlan
   )
+import OTel.Attribute (AttributeValue (..))
+import CodeStar.Telemetry (TelemetryRecorder (..), withSpan)
+import CodeStar.Telemetry qualified as Tel
 import CodeStar.Types
   ( CheckResult (..)
   , ControlSignal (..)
@@ -76,6 +83,8 @@ For Bug tasks, runs Localization first and injects results into
 the Planner prompt. Returns NeedsInput if a repeated approach is detected.
 -}
 runWithPlan ::
+  -- | Telemetry recorder
+  TelemetryRecorder ->
   -- | Architect role
   LlmClientDict ->
   -- | Planner role (same or different)
@@ -89,25 +98,69 @@ runWithPlan ::
   -- | step executor (provided by AgentLoop)
   (PlanStep -> IO ControlSignal) ->
   IO ControlSignal
-runWithPlan arch planner _coder cfg spec triedFps executeStep = do
+runWithPlan tel arch planner _coder cfg spec triedFps executeStep = do
+  let taskTypeText = Text.pack (show spec.taskType)
+
+  -- Localization (Bug tasks only)
   locCtx <- case spec.taskType of
-    Bug -> do
-      lr <- localize arch defaultLocalizationConfig spec cfg.repoContext
-      pure (either (const Text.empty) formatLocResult lr)
+    Bug ->
+      withSpan tel "plan.localize" [("task.type", StringValue "Bug")] $ \locSpan -> do
+        lr <- localize arch defaultLocalizationConfig spec cfg.repoContext
+        case lr of
+          Left err -> do
+            tel.setSpanError locSpan (Text.pack (show err))
+            pure Text.empty
+          Right result -> do
+            tel.setSpanAttrTyped locSpan "suspicious_file_count"     (Int64Value (fromIntegral (length result.lrFiles)))
+            tel.setSpanAttrTyped locSpan "suspicious_function_count" (Int64Value (fromIntegral (length result.lrFunctions)))
+            pure (formatLocResult result)
     _ -> pure Text.empty
 
-  archResult <- phase1Architect arch spec cfg
-  case archResult of
+  -- Phase 1: Architect
+  mFileSelection <- withSpan tel "plan.architect" [("task.type", StringValue taskTypeText)] $ \archSpan -> do
+    r <- wrapExceptions (phase1Architect arch spec cfg)
+    case r of
+      Left err -> tel.setSpanError archSpan err >> pure (Left err)
+      Right fs -> pure (Right fs)
+  case mFileSelection of
     Left err -> pure (Blocked err)
     Right fileSelection -> do
-      planResult <- phase2PlannerValidated planner spec cfg fileSelection locCtx
-      case planResult of
+
+      -- Phase 2: Planner
+      mPlan <- withSpan tel "plan.planner" [("task.type", StringValue taskTypeText)] $ \planSpan -> do
+        r <- wrapExceptions (phase2PlannerValidated planner spec cfg fileSelection locCtx)
+        case r of
+          Left err -> tel.setSpanError planSpan err >> pure (Left err)
+          Right (plan, retries) -> do
+            tel.setSpanAttrTyped planSpan "validation_retries" (Int64Value (fromIntegral retries))
+            tel.setSpanAttrTyped planSpan "step_count"         (Int64Value (fromIntegral (length plan.steps)))
+            pure (Right plan)
+      case mPlan of
         Left err -> pure (Blocked err)
-        Right plan ->
+        Right plan -> do
+          tel.recordEvent Tel.EvPlanGenerated
+            { Tel.stepCount = length plan.steps
+            , Tel.taskType = spec.taskType
+            }
+
           let fp = fingerprintPlan plan
-           in if Set.member fp triedFps
-                then pure (NeedsInput "Repeated approach detected — need a different strategy")
-                else phase3Execute cfg.maxReplans plan executeStep
+          if Set.member fp triedFps
+            then pure (NeedsInput "Repeated approach detected — need a different strategy")
+            else
+              -- Phase 3: Execute
+              withSpan tel "plan.execute"
+                [ ("plan.step_count", Int64Value (fromIntegral (length plan.steps)))
+                , ("task.type",       StringValue taskTypeText)
+                , ("execution_mode",  StringValue "list")
+                ] $ \execSpan -> do
+                  result <- wrapExceptionsRaw (phase3Execute cfg.maxReplans plan executeStep)
+                  case result of
+                    Left err -> do
+                      tel.setSpanError execSpan err
+                      pure (Blocked err)
+                    Right sig -> do
+                      tel.setSpanAttr execSpan "outcome" (Tel.signalLabel sig)
+                      pure sig
 
 -- --------------------------------------------------------------------
 -- Phase 1: Architect
@@ -175,7 +228,7 @@ phase2PlannerValidated ::
   PlanExecutionConfig ->
   Text ->
   Text ->
-  IO (Either Text Plan)
+  IO (Either Text (Plan, Int))
 phase2PlannerValidated client spec cfg fileSelection locCtx = go 0
  where
   go attempts = do
@@ -184,7 +237,7 @@ phase2PlannerValidated client spec cfg fileSelection locCtx = go 0
       Left err -> pure (Left err)
       Right plan ->
         case validatePlan plan of
-          Right () -> pure (Right plan)
+          Right () -> pure (Right (plan, attempts))
           Left _ ->
             if attempts >= cfg.maxReplans
               then pure (Left "Generated plan failed validation")
@@ -270,6 +323,7 @@ algorithm. Steps whose dependsOn set is satisfied execute sequentially
 in topological order (no parallelism for MVP).
 -}
 runWithPlanDag ::
+  TelemetryRecorder ->
   LlmClientDict ->
   LlmClientDict ->
   LlmClientDict ->
@@ -278,24 +332,69 @@ runWithPlanDag ::
   Set PlanFingerprint ->
   (PlanStep -> IO ControlSignal) ->
   IO ControlSignal
-runWithPlanDag arch planner _coder cfg spec triedFps executeStep = do
+runWithPlanDag tel arch planner _coder cfg spec triedFps executeStep = do
+  let taskTypeText = Text.pack (show spec.taskType)
+
+  -- Localization (Bug tasks only)
   locCtx <- case spec.taskType of
-    Bug -> do
-      lr <- localize arch defaultLocalizationConfig spec cfg.repoContext
-      pure (either (const Text.empty) formatLocResult lr)
+    Bug ->
+      withSpan tel "plan.localize" [("task.type", StringValue "Bug")] $ \locSpan -> do
+        lr <- localize arch defaultLocalizationConfig spec cfg.repoContext
+        case lr of
+          Left err -> do
+            tel.setSpanError locSpan (Text.pack (show err))
+            pure Text.empty
+          Right result -> do
+            tel.setSpanAttrTyped locSpan "suspicious_file_count"     (Int64Value (fromIntegral (length result.lrFiles)))
+            tel.setSpanAttrTyped locSpan "suspicious_function_count" (Int64Value (fromIntegral (length result.lrFunctions)))
+            pure (formatLocResult result)
     _ -> pure Text.empty
-  archResult <- phase1Architect arch spec cfg
-  case archResult of
+
+  -- Phase 1: Architect
+  mFileSelection <- withSpan tel "plan.architect" [("task.type", StringValue taskTypeText)] $ \archSpan -> do
+    r <- wrapExceptions (phase1Architect arch spec cfg)
+    case r of
+      Left err -> tel.setSpanError archSpan err >> pure (Left err)
+      Right fs -> pure (Right fs)
+  case mFileSelection of
     Left err -> pure (Blocked err)
     Right fileSelection -> do
-      planResult <- phase2PlannerValidated planner spec cfg fileSelection locCtx
-      case planResult of
+
+      -- Phase 2: Planner
+      mPlan <- withSpan tel "plan.planner" [("task.type", StringValue taskTypeText)] $ \planSpan -> do
+        r <- wrapExceptions (phase2PlannerValidated planner spec cfg fileSelection locCtx)
+        case r of
+          Left err -> tel.setSpanError planSpan err >> pure (Left err)
+          Right (plan, retries) -> do
+            tel.setSpanAttrTyped planSpan "validation_retries" (Int64Value (fromIntegral retries))
+            tel.setSpanAttrTyped planSpan "step_count"         (Int64Value (fromIntegral (length plan.steps)))
+            pure (Right plan)
+      case mPlan of
         Left err -> pure (Blocked err)
-        Right plan ->
+        Right plan -> do
+          tel.recordEvent Tel.EvPlanGenerated
+            { Tel.stepCount = length plan.steps
+            , Tel.taskType = spec.taskType
+            }
+
           let fp = fingerprintPlan plan
-           in if Set.member fp triedFps
-                then pure (NeedsInput "Repeated approach detected")
-                else dagExecute cfg.maxReplans plan executeStep
+          if Set.member fp triedFps
+            then pure (NeedsInput "Repeated approach detected")
+            else
+              -- Phase 3: Execute (DAG mode)
+              withSpan tel "plan.execute"
+                [ ("plan.step_count", Int64Value (fromIntegral (length plan.steps)))
+                , ("task.type",       StringValue taskTypeText)
+                , ("execution_mode",  StringValue "dag")
+                ] $ \execSpan -> do
+                  result <- wrapExceptionsRaw (dagExecute cfg.maxReplans plan executeStep)
+                  case result of
+                    Left err -> do
+                      tel.setSpanError execSpan err
+                      pure (Blocked err)
+                    Right sig -> do
+                      tel.setSpanAttr execSpan "outcome" (Tel.signalLabel sig)
+                      pure sig
 
 dagExecute :: Int -> Plan -> (PlanStep -> IO ControlSignal) -> IO ControlSignal
 dagExecute maxRetries plan executeStep =
@@ -367,6 +466,24 @@ extractText resp = foldMap go resp.responseContent
  where
   go (TextContent t) = t
   go _ = Text.empty
+
+-- | Catch synchronous IO exceptions and turn them into Left.
+-- Uses IOException (not SomeException) to avoid catching async exceptions.
+wrapExceptions :: IO (Either Text a) -> IO (Either Text a)
+wrapExceptions action = do
+  result <- try @IOException action
+  case result of
+    Left exc -> pure (Left (Text.pack (show exc)))
+    Right v  -> pure v
+
+-- | Like 'wrapExceptions' but for plain @IO a@ actions (no inner Either).
+-- Catches IOException and returns Left; re-throws async exceptions.
+wrapExceptionsRaw :: IO a -> IO (Either Text a)
+wrapExceptionsRaw action = do
+  result <- try @IOException action
+  case result of
+    Left exc -> pure (Left (Text.pack (show exc)))
+    Right v  -> pure (Right v)
 
 formatLocResult :: LocalizationResult -> Text
 formatLocResult lr =

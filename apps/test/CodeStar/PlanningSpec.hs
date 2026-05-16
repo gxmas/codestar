@@ -23,7 +23,7 @@ genAcyclicPlan = do
   steps <- mapM (genStep n) [0 .. n - 1]
   pure (Plan steps)
  where
-  genStep n i = do
+  genStep _ i = do
     depCount <- chooseInt (0, min i 3)
     deps <- fmap nub $ vectorOf depCount $ chooseInt (0, max 0 (i - 1))
     desc <- elements ["parse", "build", "test", "deploy", "lint", "render"]
@@ -68,27 +68,31 @@ spec = describe "CodeStar.Planning" $ do
     prop "self-dependency always produces CyclicDependency" $
       forAll genAcyclicPlan $ \plan ->
         not (null plan.steps) ==>
-          let step = head plan.steps
-              selfDep = step{dependsOn = Set.insert step.stepId step.dependsOn}
-              badPlan = Plan (selfDep : tail plan.steps)
-           in case validatePlan badPlan of
-                Left (CyclicDependency path) ->
-                  counterexample ("cycle path: " <> show path) $
-                    step.stepId `elem` path
-                other ->
-                  counterexample ("expected CyclicDependency, got: " <> show other) False
+          case plan.steps of
+            [] -> property True
+            (step : rest) ->
+              let selfDep = step{dependsOn = Set.insert step.stepId step.dependsOn}
+                  badPlan = Plan (selfDep : rest)
+              in case validatePlan badPlan of
+                   Left (CyclicDependency path) ->
+                     counterexample ("cycle path: " <> show path) $
+                       step.stepId `elem` path
+                   other ->
+                     counterexample ("expected CyclicDependency, got: " <> show other) False
 
     prop "cycle error path contains only known step IDs" $
       forAll genAcyclicPlan $ \plan ->
         not (null plan.steps) ==>
-          let step = head plan.steps
-              selfDep = step{dependsOn = Set.insert step.stepId step.dependsOn}
-              badPlan = Plan (selfDep : tail plan.steps)
-              knownIds = Set.fromList (planStepIds badPlan)
-           in case validatePlan badPlan of
+          case plan.steps of
+            [] -> property True
+            (step : rest) ->
+              let selfDep  = step{dependsOn = Set.insert step.stepId step.dependsOn}
+                  badPlan  = Plan (selfDep : rest)
+                  knownIds = Set.fromList (planStepIds badPlan)
+              in case validatePlan badPlan of
                 Left (CyclicDependency path) ->
-                  all (`Set.member` knownIds) path
-                _ -> True
+                  property (all (`Set.member` knownIds) path)
+                _ -> property True
 
   describe "fingerprintPlan" $ do
     prop "is permutation-invariant on steps" $

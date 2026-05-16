@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 -- | Internal: Shared request execution logic.
 --

@@ -52,7 +52,7 @@ import CodeStar.Context (ContextParts (..), assemble)
 import CodeStar.Context qualified as CC
 import CodeStar.Guardrails qualified as GR
 import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (ToolName (..), buildResolver, withRetry)
+import CodeStar.LLM.Base (LlmError (..), ToolName (..), buildResolver, withRetry)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
 import CodeStar.Platform.CostTracker (newCostTracker)
@@ -64,12 +64,13 @@ import CodeStar.RepoMap.Worker (RepoMapWorker, enqueueAll, enqueueFile, getCurre
 import CodeStar.Storage (StorageBackend, newBackend)
 import CodeStar.Telemetry
   ( OtelSettings (..)
-  , TelemetryRecorder
+  , TelemetryRecorder (..)
   , jsonRecorder
   , noOpRecorder
   , otlpRecorderWithHandle
   , shutdownTelemetry
   )
+import CodeStar.Telemetry qualified as Tel
 import CodeStar.Tools.Edit (editToolHandler)
 import CodeStar.Tools.Glob (globToolHandler)
 import CodeStar.Tools.Grep (grepToolHandler)
@@ -190,7 +191,15 @@ runAgentCli runArgs = do
   resEngine <- newRecoveryEngine defaultRecoveryPolicy
   let ApiKey key = config.apiKey
   baseResolver <- buildResolver config.modelRoles (newAnthropicClient key)
-  let resolver = \role -> withRetry resEngine (baseResolver role)
+  let onRetry err attempt = recorder.recordEvent Tel.EvLlmRetry
+        { Tel.retryError       = llmErrorLabel err
+        , Tel.retryAttempt     = attempt
+        , Tel.retryAfterHintMs = case err of
+            RateLimited secs -> round (secs * 1000)
+            _                -> 0
+        , Tel.lrSessionId      = ""
+        }
+      resolver = \role -> withRetry resEngine onRetry (baseResolver role)
   tracker <- newReadTracker
   todoStore <- newTodoStore
   globalCfgDir <- Paths.globalConfigDir
@@ -219,7 +228,7 @@ runAgentCli runArgs = do
   repoMapText <- getCurrentMap repoWorker
 
   let sandbox = noSandbox config.workspacePath
-  mcpHandlers <- connectMcpEndpoints config.mcpEndpoints
+  mcpHandlers <- connectMcpEndpoints recorder config.mcpEndpoints
   -- Wire edit callback to both invalidate cache AND enqueue for re-indexing
   let onEdit path = do
         repoCache.invalidate path
@@ -286,6 +295,15 @@ buildSystemPrompt registry =
     , generateDocs registry
     ]
 
+llmErrorLabel :: LlmError -> Text
+llmErrorLabel (RateLimited _)         = "RateLimited"
+llmErrorLabel (AuthenticationFailed _) = "AuthenticationFailed"
+llmErrorLabel (ContextTooLong _ _)    = "ContextTooLong"
+llmErrorLabel (ContentFiltered _)     = "ContentFiltered"
+llmErrorLabel (InvalidRequest _)      = "InvalidRequest"
+llmErrorLabel (ProviderError _)       = "ProviderError"
+llmErrorLabel (NetworkError _)        = "NetworkError"
+
 -- --------------------------------------------------------------------
 -- Telemetry backend
 -- --------------------------------------------------------------------
@@ -303,6 +321,9 @@ mkRecorder tel = case tel.mode of
         , metricsEnabled = tel.metricsEnabled
         , metricsBindHost = tel.metricsBindHost
         , metricsPort = tel.metricsPort
+        , sessionId = Nothing
+        , userId = Nothing
+        , tracesSampleRate = tel.sampleRate
         }
 
 mkOtelRecorder :: OtelSettings -> IO (TelemetryRecorder, IO ())

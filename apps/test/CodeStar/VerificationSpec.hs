@@ -1,6 +1,6 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 module CodeStar.VerificationSpec (spec) where
 
-import Data.Text (Text)
 import Data.Text qualified as Text
 import Test.Hspec
 import Test.Hspec.QuickCheck

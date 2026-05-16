@@ -35,7 +35,7 @@ library
     , exceptions            >= 0.10  && < 0.11
     , text                  >= 2.0   && < 2.2
     , unordered-containers  >= 0.2.16 && < 0.3
-    , telemetry-core
+    , otel-api
     , vector                >= 0.12  && < 0.14
 
 test-suite json-rpc-server-test

@@ -59,6 +59,7 @@ resolveTelemetry p = TelemetrySection
   , metricsEnabled = fromLast defaultConfig.telemetry.metricsEnabled p.metricsEnabled
   , metricsBindHost = fromLast defaultConfig.telemetry.metricsBindHost p.metricsBindHost
   , metricsPort    = fromLast defaultConfig.telemetry.metricsPort    p.metricsPort
+  , sampleRate     = fromLast defaultConfig.telemetry.sampleRate     p.sampleRate
   }
 
 resolveContext :: PartialContextSection -> ContextSection
@@ -145,6 +146,7 @@ validate cfg = concat
   , validatePositive "repomap.batch_size"              cfg.repomap.batchSize
   , validatePositive "memory.max_entries"              cfg.memory.maxEntries
   , validateFraction "compaction.trigger_fraction"     cfg.compaction.triggerFraction
+  , validateSampleRate "telemetry.sample_rate"        cfg.telemetry.sampleRate
   , checkPortConflict cfg
   , checkApiKey cfg
   ]
@@ -162,6 +164,11 @@ validatePositive name val
 validateFraction :: Text -> Double -> [ConfigError]
 validateFraction name val
   | val > 0 && val <= 1 = []
+  | otherwise = [InvalidFraction name val]
+
+validateSampleRate :: Text -> Double -> [ConfigError]
+validateSampleRate name val
+  | val >= 0 && val <= 1 = []
   | otherwise = [InvalidFraction name val]
 
 checkPortConflict :: Config -> [ConfigError]

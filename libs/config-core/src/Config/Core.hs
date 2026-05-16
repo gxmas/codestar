@@ -64,7 +64,39 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
 import Storage.Core (Storage, StorageError, Key, putJSON, getJSON)
-import Telemetry.Core (Severity (..), log, AttributeValue (..))
+import OTel.Log
+  ( getGlobalLoggerProvider
+  , getLogger
+  , defaultLogRecord
+  , LogBody (..)
+  , SeverityNumber (..)
+  , LogRecord (..)
+  , emit
+  )
+import OTel.Attribute (AttributeValue (..), Attribute, InstrumentationScope (..))
+import OTel.Attribute qualified as OTelAttr
+import OTel.Context (getCurrent)
+
+-- ---------------------------------------------------------------------------
+-- Logging helper
+-- ---------------------------------------------------------------------------
+
+logMsg :: SeverityNumber -> Text -> [Attribute] -> IO ()
+logMsg sev body attrs = do
+  provider <- getGlobalLoggerProvider
+  logger <- getLogger provider InstrumentationScope
+    { scopeName = "config-core"
+    , scopeVersion = Nothing
+    , scopeSchemaUrl = Nothing
+    , scopeAttributes = Nothing
+    }
+  ctx <- getCurrent
+  emit logger defaultLogRecord
+    { logSeverityNumber = Just sev
+    , logBody = Just (LogBodyString body)
+    , logAttributes = OTelAttr.fromList attrs
+    , logContext = Just ctx
+    }
 
 -- ---------------------------------------------------------------------------
 -- Scopes
@@ -233,9 +265,9 @@ setConfig cfg scope key val = do
   case Map.lookup key schemas of
     Nothing -> do
       modifyIORef' (scopeRef cfg scope) (Map.insert key val)
-      log INFO "Config override applied"
-        [ ("config.key", TextValue (unConfigKey key))
-        , ("config.scope", TextValue (T.pack (show scope)))
+      logMsg SeverityInfo "Config override applied"
+        [ ("config.key", StringValue (unConfigKey key))
+        , ("config.scope", StringValue (T.pack (show scope)))
         ]
       pure (Right ())
     Just schema
@@ -249,16 +281,16 @@ setConfig cfg scope key val = do
             Left msg -> pure $ Left ValidationError { veKey = key, veMessage = msg }
             Right () -> do
               modifyIORef' (scopeRef cfg scope) (Map.insert key val)
-              log INFO "Config override applied"
-                [ ("config.key", TextValue (unConfigKey key))
-                , ("config.scope", TextValue (T.pack (show scope)))
+              logMsg SeverityInfo "Config override applied"
+                [ ("config.key", StringValue (unConfigKey key))
+                , ("config.scope", StringValue (T.pack (show scope)))
                 ]
               pure (Right ())
           Nothing -> do
             modifyIORef' (scopeRef cfg scope) (Map.insert key val)
-            log INFO "Config override applied"
-              [ ("config.key", TextValue (unConfigKey key))
-              , ("config.scope", TextValue (T.pack (show scope)))
+            logMsg SeverityInfo "Config override applied"
+              [ ("config.key", StringValue (unConfigKey key))
+              , ("config.scope", StringValue (T.pack (show scope)))
               ]
             pure (Right ())
 
@@ -304,16 +336,16 @@ loadFromFile cfg store scope key = do
   result <- getJSON store "config" key
   case result of
     Left err -> do
-      log ERROR "Config load failed"
-        [ ("config.scope", TextValue (T.pack (show scope)))
-        , ("error", TextValue (T.pack (show err)))
+      logMsg SeverityError "Config load failed"
+        [ ("config.scope", StringValue (T.pack (show scope)))
+        , ("error", StringValue (T.pack (show err)))
         ]
       pure (Left err)
     Right (vals :: Map ConfigKey ConfigValue) -> do
       writeIORef (scopeRef cfg scope) vals
-      log INFO "Config source loaded"
-        [ ("config.scope", TextValue (T.pack (show scope)))
-        , ("config.source", TextValue key)
+      logMsg SeverityInfo "Config source loaded"
+        [ ("config.scope", StringValue (T.pack (show scope)))
+        , ("config.source", StringValue key)
         ]
       pure (Right ())
 

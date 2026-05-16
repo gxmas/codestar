@@ -355,7 +355,7 @@ scriptedClient ref =
         resp <- popResponse ref
         mapM_ (emitToken onEvent) resp.responseContent
         pure (Right resp)
-    , countTokens = \_ -> pure (Right TokenCount{inputTokens = 0, outputTokens = 0})
+    , countTokens = \_ -> pure (Right TokenCount{inputTokens = 0, outputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0})
     }
 
 emitToken :: (CompletionEvent -> IO ()) -> Content -> IO ()
@@ -374,7 +374,7 @@ mkDoneResponse =
   CompletionResponse
     { responseContent = [TextContent "done"]
     , stopReason = EndTurn
-    , usage = TokenCount 1 1
+    , usage = TokenCount 1 1 0 0
     }
 
 mkSummaryResponse :: CompletionResponse
@@ -382,7 +382,7 @@ mkSummaryResponse =
   CompletionResponse
     { responseContent = [TextContent "summary"]
     , stopReason = EndTurn
-    , usage = TokenCount 1 1
+    , usage = TokenCount 1 1 0 0
     }
 
 mkToolUseResponse :: Text -> Text -> CompletionResponse
@@ -397,7 +397,7 @@ mkToolUseResponse callId tool =
               }
         ]
     , stopReason = ToolUse
-    , usage = TokenCount 1 1
+    , usage = TokenCount 1 1 0 0
     }
 
 okHandler :: IORef [Text] -> Text -> ToolHandlerDict

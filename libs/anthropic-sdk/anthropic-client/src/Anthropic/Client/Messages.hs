@@ -9,11 +9,12 @@ module Anthropic.Client.Messages
 
 import Prelude hiding (log)
 
-import Anthropic.Client.Config (AnthropicClient, ClientError)
+import Anthropic.Client.Config (AnthropicClient, ClientError, getClientTracer)
 import Anthropic.Client.Internal.Execute (executeJsonPost)
 import Anthropic.Protocol.Message (MessageRequest, MessageResponse)
 import Anthropic.Protocol.TokenCount (TokenCountRequest, TokenCountResponse)
-import Telemetry.Core (withSpan, AttributeValue(..))
+import OTel.Trace (withSpan)
+import OTel.Attribute (AttributeValue(..))
 
 -- | Create a message (non-streaming).
 --
@@ -29,7 +30,7 @@ createMessage
   -> MessageRequest
   -> IO (Either ClientError MessageResponse)
 createMessage client req =
-  withSpan "gen_ai.chat" [("gen_ai.system", TextValue "anthropic")] $
+  withSpan (getClientTracer client) "gen_ai.chat" [("gen_ai.system", StringValue "anthropic")] $
     executeJsonPost client "/v1/messages" req
 
 -- | Count input tokens for a request without creating a message.
@@ -38,5 +39,5 @@ countTokens
   -> TokenCountRequest
   -> IO (Either ClientError TokenCountResponse)
 countTokens client req =
-  withSpan "gen_ai.token_count" [("gen_ai.system", TextValue "anthropic")] $
+  withSpan (getClientTracer client) "gen_ai.token_count" [("gen_ai.system", StringValue "anthropic")] $
     executeJsonPost client "/v1/messages/count_tokens" req

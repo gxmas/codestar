@@ -33,7 +33,7 @@ spec = describe "CodeStar.LLM.Ollama" $ do
   it "countTokens is available without network dependency" $ do
     client <- newOllamaClient "llama3"
     tok <- countTokens client [Message User [TextContent "hello"]]
-    tok `shouldBe` Right (TokenCount 0 0)
+    tok `shouldBe` Right (TokenCount 0 0 0 0)
 
   it "complete returns an error for unreachable Ollama endpoint" $ do
     client <- newOllamaClientAt "http://127.0.0.1:1" "codellama"

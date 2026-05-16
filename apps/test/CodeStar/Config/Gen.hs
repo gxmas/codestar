@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 module CodeStar.Config.Gen where
 
 import Data.Map.Strict qualified as Map
@@ -5,11 +6,10 @@ import Data.Monoid (Last (..))
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Word (Word64)
 import Test.QuickCheck
 
 import CodeStar.Config.Types
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 -- --------------------------------------------------------------------
 -- Primitive generators and shrinkers
@@ -142,14 +142,16 @@ instance Arbitrary PartialTelemetrySection where
       <*> arbitraryLast arbitrary
       <*> arbitraryLast arbitraryConfigText
       <*> arbitraryLast (oneof [pure Nothing, Just <$> choose (1024, 65535)])
-  shrink (PartialTelemetrySection mo sn ep ls me mbh mp) =
-    [PartialTelemetrySection mo' sn ep ls me mbh mp | mo' <- shrinkLast shrink mo]                  ++
-    [PartialTelemetrySection mo sn' ep ls me mbh mp | sn' <- shrinkLast shrinkConfigText sn]        ++
-    [PartialTelemetrySection mo sn ep' ls me mbh mp | ep' <- shrinkLast shrinkMaybeText ep]         ++
-    [PartialTelemetrySection mo sn ep ls' me mbh mp | ls' <- shrinkLast shrink ls]                  ++
-    [PartialTelemetrySection mo sn ep ls me' mbh mp | me' <- shrinkLast shrink me]                  ++
-    [PartialTelemetrySection mo sn ep ls me mbh' mp | mbh' <- shrinkLast shrinkConfigText mbh]      ++
-    [PartialTelemetrySection mo sn ep ls me mbh mp' | mp' <- shrinkLast shrink mp]
+      <*> arbitraryLast (choose (0.0, 1.0))
+  shrink (PartialTelemetrySection mo sn ep ls me mbh mp sr) =
+    [PartialTelemetrySection mo' sn ep ls me mbh mp sr | mo' <- shrinkLast shrink mo]                  ++
+    [PartialTelemetrySection mo sn' ep ls me mbh mp sr | sn' <- shrinkLast shrinkConfigText sn]        ++
+    [PartialTelemetrySection mo sn ep' ls me mbh mp sr | ep' <- shrinkLast shrinkMaybeText ep]         ++
+    [PartialTelemetrySection mo sn ep ls' me mbh mp sr | ls' <- shrinkLast shrink ls]                  ++
+    [PartialTelemetrySection mo sn ep ls me' mbh mp sr | me' <- shrinkLast shrink me]                  ++
+    [PartialTelemetrySection mo sn ep ls me mbh' mp sr | mbh' <- shrinkLast shrinkConfigText mbh]      ++
+    [PartialTelemetrySection mo sn ep ls me mbh mp' sr | mp' <- shrinkLast shrink mp]                  ++
+    [PartialTelemetrySection mo sn ep ls me mbh mp sr' | sr' <- shrinkLast shrink sr]
 
 instance Arbitrary PartialContextSection where
   arbitrary =

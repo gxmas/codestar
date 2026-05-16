@@ -1,14 +1,21 @@
+{-# LANGUAGE RecordWildCards #-}
 module CodeStar.Config.PartialSpec (spec) where
 
 import Data.Maybe (isJust)
 import Data.Monoid (Last (..))
 import Data.Text qualified as Text
-import Test.Hspec
+import Test.Hspec hiding (context)
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
 
 import CodeStar.Config.Gen ()
 import CodeStar.Config.Types
+
+-- Record construction (not update) to avoid deprecated type-directed disambiguation.
+partialWithProvider :: String -> PartialConfig
+partialWithProvider v =
+  let PartialConfig{..} = mempty :: PartialConfig
+  in PartialConfig{provider = Last (Just (Text.pack v)), ..}
 
 -- --------------------------------------------------------------------
 -- Distribution helpers
@@ -77,13 +84,13 @@ spec = describe "PartialConfig monoid laws" $ do
 
   prop "later layer wins: a field set in b overrides a" $
     \a v ->
-      let b = (mempty :: PartialConfig){provider = Last (Just (Text.pack v))}
+      let b = partialWithProvider v
           merged = a <> b
        in merged.provider === Last (Just (Text.pack v))
 
   prop "earlier layer preserved when later is empty" $
     \v ->
-      let a = (mempty :: PartialConfig){provider = Last (Just (Text.pack v))}
+      let a = partialWithProvider v
           merged = a <> mempty
        in merged.provider === Last (Just (Text.pack v))
 

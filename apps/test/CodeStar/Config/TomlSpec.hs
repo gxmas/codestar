@@ -34,8 +34,8 @@ collapseJustNothing (Last (Just Nothing)) = Last Nothing
 collapseJustNothing x                     = x
 
 normalizeTelemetry :: PartialTelemetrySection -> PartialTelemetrySection
-normalizeTelemetry (PartialTelemetrySection mo sn ep ls me mbh mp) =
-  PartialTelemetrySection mo sn (collapseJustNothing ep) ls me mbh (collapseJustNothing mp)
+normalizeTelemetry (PartialTelemetrySection mo sn ep ls me mbh mp sr) =
+  PartialTelemetrySection mo sn (collapseJustNothing ep) ls me mbh (collapseJustNothing mp) sr
 
 normalizeBudget :: PartialBudgetSection -> PartialBudgetSection
 normalizeBudget (PartialBudgetSection ms stm dtm) =
@@ -126,8 +126,8 @@ renderModelRoles :: Maybe (Map ModelRole ModelSpec) -> [Text]
 renderModelRoles Nothing  = []
 renderModelRoles (Just m) = concatMap go (Map.toList m)
   where
-    go (role, spec) =
-      sectionLines ("models." <> roleKey role) (renderModelSpec spec)
+    go (role, ms) =
+      sectionLines ("models." <> roleKey role) (renderModelSpec ms)
     roleKey Architect  = "architect"
     roleKey Coder      = "coder"
     roleKey Validator  = "validator"
@@ -160,6 +160,7 @@ renderTelemetry s = sectionLines "telemetry" $ concat
   , [ kv "metrics_enabled" renderBool          b | b <- mf s.metricsEnabled ]
   , [ kv "metrics_bind_host" renderStr         h | h <- mf s.metricsBindHost ]
   , [ kv "metrics_port"    renderInt           n | Just (Just n) <- [getLast s.metricsPort] ]
+  , [ kv "sample_rate"    renderDouble        r | r <- mf s.sampleRate ]
   ]
 
 renderContext :: PartialContextSection -> [Text]

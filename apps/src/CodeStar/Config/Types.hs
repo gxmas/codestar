@@ -167,6 +167,7 @@ data TelemetrySection = TelemetrySection
   , metricsEnabled :: !Bool
   , metricsBindHost :: !Text
   , metricsPort    :: !(Maybe Int)
+  , sampleRate     :: !Double        -- ^ Trace sampling ratio 0.0–1.0. Default 1.0.
   } deriving stock (Eq, Show)
 
 data ContextSection = ContextSection
@@ -245,16 +246,18 @@ data PartialTelemetrySection = PartialTelemetrySection
   , metricsEnabled :: !(Last Bool)
   , metricsBindHost :: !(Last Text)
   , metricsPort    :: !(Last (Maybe Int))
+  , sampleRate     :: !(Last Double)
   } deriving stock (Eq, Show)
 
 instance Semigroup PartialTelemetrySection where
   a <> b = PartialTelemetrySection
     (a.mode <> b.mode) (a.serviceName <> b.serviceName) (a.endpoint <> b.endpoint)
     (a.logToStderr <> b.logToStderr) (a.metricsEnabled <> b.metricsEnabled) (a.metricsBindHost <> b.metricsBindHost) (a.metricsPort <> b.metricsPort)
+    (a.sampleRate <> b.sampleRate)
 
 instance Monoid PartialTelemetrySection where
   mempty = PartialTelemetrySection
-    (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing)
+    (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing)
 
 data PartialContextSection = PartialContextSection
   { maxTokens         :: !(Last Int)

@@ -33,8 +33,8 @@ spec = describe "CodeStar.Config.Json" $ do
     let input =
           BS8.pack
             "{\"memoryConfig\":{\"enabled\":false,\"maxEntries\":12,\"autoDiscover\":false}}"
-    let Right parsed = parseJsonConfig input
-        CT.PartialConfig
+    parsed <- either (fail . show) pure (parseJsonConfig input)
+    let CT.PartialConfig
           { CT.memory =
               CT.PartialMemorySection
                 { CT.enabled = en

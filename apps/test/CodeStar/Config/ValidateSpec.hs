@@ -1,11 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{-# LANGUAGE RecordWildCards #-}
 module CodeStar.Config.ValidateSpec (spec) where
 
 import Data.List.NonEmpty (toList)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Monoid (Last (..))
-import Test.Hspec
+import Test.Hspec hiding (context)
 
 import CodeStar.Config.Types
 import CodeStar.Config.Validate (resolve)
@@ -17,7 +18,8 @@ spec = describe "CodeStar.Config.Validate" $ do
     resolve partial `shouldSatisfy` hasMissingApiKey
 
   it "applies defaults and resolves successfully with provided api key" $ do
-    let partial = (mempty :: PartialConfig){apiKey = Last (Just (ApiKey "k"))}
+    let partial = let PartialConfig{..} = mempty :: PartialConfig
+                  in PartialConfig{apiKey = Last (Just (ApiKey "k")), ..}
     case resolve partial of
       Left err -> expectationFailure ("Expected Right Config, got Left: " <> show err)
       Right cfg -> do
@@ -27,7 +29,8 @@ spec = describe "CodeStar.Config.Validate" $ do
 
   it "reports invalid ranges and port conflicts" $ do
     let partial =
-          (mempty :: PartialConfig)
+          let PartialConfig{..} = mempty :: PartialConfig
+          in PartialConfig
             { apiKey = Last (Just (ApiKey "k"))
             , server =
                 PartialServerSection
@@ -46,7 +49,9 @@ spec = describe "CodeStar.Config.Validate" $ do
                   , metricsEnabled = Last Nothing
                   , metricsBindHost = Last Nothing
                   , metricsPort = Last (Just (Just 70000))
+                  , sampleRate = Last Nothing
                   }
+            , ..
             }
     resolve partial `shouldSatisfy` hasInvalidRange
 

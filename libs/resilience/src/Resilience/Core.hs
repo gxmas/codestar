@@ -51,15 +51,15 @@ import Data.Aeson (ToJSON, FromJSON, Value)
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', writeIORef)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Time (UTCTime, NominalDiffTime, getCurrentTime, diffUTCTime)
 import GHC.Generics (Generic)
 import System.Random (randomRIO)
 
 import qualified Data.Map.Strict as Map
 
-import qualified Telemetry.Core
-import Telemetry.Core (withSpan, AttributeValue (..))
+import OTel.Trace (withSpan, SomeTracer, getGlobalTracerProvider, getTracer, startSpan, end, defaultSpanConfig, SpanConfig(..))
+import OTel.Attribute (AttributeValue(..), InstrumentationScope(..))
+import OTel.Context (getCurrent)
 
 -- ---------------------------------------------------------------------------
 -- Backoff strategies
@@ -157,13 +157,27 @@ data RecoveryEngine = RecoveryEngine
   { reDefaultPolicy     :: !(IORef RecoveryPolicy)
   , reOperationPolicies :: !(IORef (Map Text RecoveryPolicy))
   , reCircuits          :: !(IORef (Map Text CircuitInfo))
+  , reTracer            :: !SomeTracer
   }
 
 newRecoveryEngine :: RecoveryPolicy -> IO RecoveryEngine
-newRecoveryEngine policy = RecoveryEngine
-  <$> newIORef policy
-  <*> newIORef Map.empty
-  <*> newIORef Map.empty
+newRecoveryEngine policy = do
+  defRef <- newIORef policy
+  opsRef <- newIORef Map.empty
+  cirRef <- newIORef Map.empty
+  provider <- getGlobalTracerProvider
+  tracer <- getTracer provider InstrumentationScope
+    { scopeName = "resilience"
+    , scopeVersion = Nothing
+    , scopeSchemaUrl = Nothing
+    , scopeAttributes = Nothing
+    }
+  pure RecoveryEngine
+    { reDefaultPolicy = defRef
+    , reOperationPolicies = opsRef
+    , reCircuits = cirRef
+    , reTracer = tracer
+    }
 
 -- ---------------------------------------------------------------------------
 -- Execution
@@ -171,8 +185,8 @@ newRecoveryEngine policy = RecoveryEngine
 
 withRecovery :: RecoveryEngine -> Text -> IO a -> IO (RecoveryResult a)
 withRecovery engine opName action =
-  withSpan "resilience.recover"
-    [("resilience.operation", TextValue opName)] $ do
+  withSpan (reTracer engine) "resilience.recover"
+    [("resilience.operation", StringValue opName)] $ do
   policy <- getPolicy engine opName
   case rpCircuitBreaker policy of
     Nothing -> retryLoop policy 0
@@ -199,13 +213,10 @@ withRecovery engine opName action =
               pure (FailedAfterRetries err (attempt + 1))
           | otherwise -> do
               delay <- computeDelay (rpBackoff policy) (attempt + 1)
-              span' <- Telemetry.Core.startSpan "resilience.retry"
-                [ ("retry.attempt", IntValue (attempt + 1))
-                , ("retry.delay_ms", IntValue (round (delay * 1000)))
-                , ("retry.error", TextValue (T.pack (show err)))
-                ]
+              ctx_span' <- getCurrent
+              span' <- startSpan (reTracer engine) "resilience.retry" ctx_span' defaultSpanConfig { spanAttributes = [ ("retry.attempt", Int64Value (fromIntegral (attempt + 1)))] }
               threadDelay (nominalToMicros delay)
-              Telemetry.Core.endSpan span'
+              end span' Nothing
               retryLoop policy (attempt + 1)
 
     retryLoopWithCircuit ci policy attempt = do
@@ -338,8 +349,8 @@ withRecoveryEither
   -> IO (Either e a)
   -> IO (Either e a)
 withRecoveryEither engine opName isRetryable delayOverride action =
-  withSpan "resilience.recover"
-    [("resilience.operation", TextValue opName)] $ do
+  withSpan (reTracer engine) "resilience.recover"
+    [("resilience.operation", StringValue opName)] $ do
   policy <- getPolicy engine opName
   go policy 0
   where
@@ -354,10 +365,8 @@ withRecoveryEither engine opName isRetryable delayOverride action =
               delay <- case delayOverride err of
                 Just d  -> pure d
                 Nothing -> computeDelay (rpBackoff policy) (attempt + 1)
-              span' <- Telemetry.Core.startSpan "resilience.retry"
-                [ ("retry.attempt",   IntValue (attempt + 1))
-                , ("retry.delay_ms",  IntValue (round (delay * 1000)))
-                ]
+              ctx_span' <- getCurrent
+              span' <- startSpan (reTracer engine) "resilience.retry" ctx_span' defaultSpanConfig { spanAttributes = [ ("retry.attempt",   Int64Value (fromIntegral (attempt + 1)))] }
               threadDelay (nominalToMicros delay)
-              Telemetry.Core.endSpan span'
+              end span' Nothing
               go policy (attempt + 1)
