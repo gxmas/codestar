@@ -21,6 +21,7 @@ spec = describe "CodeStar.Tools.MCP" $ do
             , args = []
             , env = Map.empty
             , transport = StdioTransport
+            , auth = Nothing
             }
     handlers <- connectMcpEndpoints noOpRecorder [badEp]
     length handlers `shouldBe` 0
@@ -33,6 +34,7 @@ spec = describe "CodeStar.Tools.MCP" $ do
             , args = []
             , env = Map.empty
             , transport = HttpTransport
+            , auth = Nothing
             }
     handlers <- connectMcpEndpoints noOpRecorder [badHttp]
     length handlers `shouldBe` 0

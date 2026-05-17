@@ -39,7 +39,7 @@ instance FromJSON LegacyPartialConfig where
       (Last modelRoles)
       (Last planningMode)
       (Last Nothing)
-      (Last Nothing)
+      mempty
       (Last Nothing)
       (Last Nothing)
       (Last indexStrat)

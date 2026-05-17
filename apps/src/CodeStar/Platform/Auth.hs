@@ -9,6 +9,7 @@ module CodeStar.Platform.Auth
     -- * Validation
   , authenticate
   , noAuth
+  , extractBearer
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
@@ -35,12 +36,9 @@ data Identity = Identity
 -- --------------------------------------------------------------------
 
 data AuthConfig
-  = -- | No authentication; every connection gets a fixed anonymous identity.
-    NoAuthConfig
-  | {- | Validate a bearer token using the provided predicate.
-    Use constant-time comparison in production predicates.
-    -}
-    ApiKeyConfig !(Text -> Bool)
+  = NoAuthConfig
+  | ApiKeyConfig !(Text -> Bool)
+  | JwtConfig !(Text -> IO AuthResult)
 
 data AuthResult
   = Authenticated !Identity
@@ -64,6 +62,10 @@ authenticate (ApiKeyConfig validate) header =
       if validate token
         then pure (Authenticated (apiKeyIdentity token))
         else pure (Unauthenticated "Invalid API key")
+authenticate (JwtConfig validate) header =
+  case extractBearer header of
+    Nothing -> pure (Unauthenticated "Missing or malformed Authorization header")
+    Just token -> validate token
 
 -- | Always return the anonymous identity. Used in CLI / local mode.
 noAuth :: IO AuthResult

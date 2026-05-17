@@ -33,6 +33,7 @@ import CodeStar.PlanTelemetrySpec qualified
 import CodeStar.PlanTelemetryExtraSpec qualified
 import CodeStar.PlanningSpec qualified
 import CodeStar.Platform.AuthSpec qualified
+import CodeStar.Platform.Auth.JwtSpec qualified
 import CodeStar.Platform.CostTrackerSpec qualified
 import CodeStar.Platform.SandboxSpec qualified
 import CodeStar.Platform.SessionManagerSpec qualified
@@ -108,6 +109,7 @@ main = hspec $ do
   CodeStar.PlanTelemetryExtraSpec.spec
   CodeStar.PlanningSpec.spec
   CodeStar.Platform.AuthSpec.spec
+  CodeStar.Platform.Auth.JwtSpec.spec
   CodeStar.Platform.CostTrackerSpec.spec
   CodeStar.Platform.SandboxSpec.spec
   CodeStar.Platform.SessionManagerSpec.spec

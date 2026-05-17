@@ -80,6 +80,8 @@ library
     CodeStar.Platform.CostTracker
     CodeStar.Platform.Sandbox
     CodeStar.Platform.Auth
+    CodeStar.Platform.Auth.Jwks
+    CodeStar.Platform.Auth.Jwt
   other-modules:
     CodeStar.RepoMap.Graph.Extract
     CodeStar.RepoMap.Graph.Extract.Haskell
@@ -95,6 +97,9 @@ library
     , async
     , bytestring
     , containers
+    , base64-bytestring >= 1.2
+    , crypton >= 0.34
+    , ram >= 0.20
     , http-client
     , http-client-tls
     , http-types
@@ -173,6 +178,7 @@ executable codestar-server
     , codestar
     , directory
     , filepath
+    , http-client-tls
     , otel-api
     , resilience
     , stm
@@ -235,6 +241,7 @@ test-suite codestar-test
     CodeStar.PlanTelemetryExtraSpec
     CodeStar.PlanningSpec
     CodeStar.Platform.AuthSpec
+    CodeStar.Platform.Auth.JwtSpec
     CodeStar.Platform.CostTrackerSpec
     CodeStar.Platform.SandboxSpec
     CodeStar.Platform.SessionManagerSpec
@@ -298,6 +305,11 @@ test-suite codestar-test
     , QuickCheck
     , resilience
     , stm
+    , base64-bytestring
+    , crypton
+    , http-client
+    , ram
     , text
+    , time
     , vector
     , websockets

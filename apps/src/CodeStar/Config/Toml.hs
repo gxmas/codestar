@@ -39,13 +39,14 @@ configDecoder = do
   rm           <- optSection repoMapDecoder "repomap"
   mem          <- optSection memoryDecoder "memory"
   mdls         <- optSection modelsDecoder' "models"
+  authSect     <- optSection authDecoder "auth"
 
   pure PartialConfig
     { provider      = Last provider
     , modelRoles    = Last (join mdls)
     , planningMode  = Last (fmap toPlanningMode planningMode)
     , sandboxMode   = Last Nothing
-    , authMode      = Last Nothing
+    , auth          = maybe mempty id authSect
     , workspacePath = Last Nothing
     , apiKey        = Last Nothing
     , indexStrategy = Last (fmap toIndexStrategy indexStrat)
@@ -196,6 +197,31 @@ memoryDecoder = do
     { enabled      = Last en
     , maxEntries   = Last me
     , autoDiscover = Last ad
+    }
+
+authDecoder :: Decoder PartialAuthSection
+authDecoder = do
+  m   <- getFieldOpt "mode"
+  uri <- getFieldOpt "jwks_uri"
+  inl <- getFieldOpt "jwks_inline"
+  sec <- getFieldOpt "secret"
+  iss <- getFieldOpt "issuer"
+  aud <- getFieldOpt "audience"
+  cu  <- getFieldOpt "claim_user_id"
+  co  <- getFieldOpt "claim_org_id"
+  cr  <- getFieldOpt "claim_roles"
+  ttl <- getFieldOpt "cache_ttl_seconds"
+  pure PartialAuthSection
+    { mode            = Last m
+    , jwksUri         = Last uri
+    , jwksInline      = Last inl
+    , secret          = Last sec
+    , issuer          = Last (Just <$> iss)
+    , audience        = Last (Just <$> aud)
+    , claimUserId     = Last cu
+    , claimOrgId      = Last co
+    , claimRoles      = Last cr
+    , cacheTtlSeconds = Last ttl
     }
 
 modelsDecoder' :: Decoder (Maybe (Map ModelRole ModelSpec))

@@ -37,12 +37,15 @@ module CodeStar.Config.Types
   , PartialBudgetSection (..)
   , PartialRepoMapSection (..)
   , PartialMemorySection (..)
+  , PartialAuthSection (..)
 
     -- * Enums
   , TelemetryMode (..)
   , IndexStrategy (..)
   , SandboxMode (..)
   , AuthMode (..)
+  , JwtAuthConfig (..)
+  , JwksSource (..)
 
     -- * MCP
   , McpAuthConfig (..)
@@ -123,9 +126,24 @@ data SandboxMode = NoSandbox
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON)
 
-data AuthMode = NoAuth
+data AuthMode = NoAuth | JwtAuth !JwtAuthConfig
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON)
+
+data JwtAuthConfig = JwtAuthConfig
+  { jwksSource      :: !JwksSource
+  , issuer          :: !(Maybe Text)
+  , audience        :: !(Maybe Text)
+  , claimUserId     :: !Text
+  , claimOrgId      :: !Text
+  , claimRoles      :: !Text
+  , cacheTtlSeconds :: !Int
+  } deriving stock (Eq, Show, Generic)
+
+data JwksSource
+  = JwksUri !Text
+  | JwksInline !Text
+  | JwksHmacSecret !Text
+  deriving stock (Eq, Show, Generic)
 
 -- --------------------------------------------------------------------
 -- MCP
@@ -377,6 +395,31 @@ instance Semigroup PartialMemorySection where
 instance Monoid PartialMemorySection where
   mempty = PartialMemorySection (Last Nothing) (Last Nothing) (Last Nothing)
 
+data PartialAuthSection = PartialAuthSection
+  { mode            :: !(Last Text)
+  , jwksUri         :: !(Last Text)
+  , jwksInline      :: !(Last Text)
+  , secret          :: !(Last Text)
+  , issuer          :: !(Last (Maybe Text))
+  , audience        :: !(Last (Maybe Text))
+  , claimUserId     :: !(Last Text)
+  , claimOrgId      :: !(Last Text)
+  , claimRoles      :: !(Last Text)
+  , cacheTtlSeconds :: !(Last Int)
+  } deriving stock (Eq, Show)
+
+instance Semigroup PartialAuthSection where
+  a <> b = PartialAuthSection
+    (a.mode <> b.mode) (a.jwksUri <> b.jwksUri) (a.jwksInline <> b.jwksInline)
+    (a.secret <> b.secret) (a.issuer <> b.issuer) (a.audience <> b.audience)
+    (a.claimUserId <> b.claimUserId) (a.claimOrgId <> b.claimOrgId)
+    (a.claimRoles <> b.claimRoles) (a.cacheTtlSeconds <> b.cacheTtlSeconds)
+
+instance Monoid PartialAuthSection where
+  mempty = PartialAuthSection
+    (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing)
+    (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing) (Last Nothing)
+
 -- --------------------------------------------------------------------
 -- Top-level Config
 -- --------------------------------------------------------------------
@@ -409,7 +452,7 @@ data PartialConfig = PartialConfig
   , modelRoles    :: !(Last (Map ModelRole ModelSpec))
   , planningMode  :: !(Last PlanningMode)
   , sandboxMode   :: !(Last SandboxMode)
-  , authMode      :: !(Last AuthMode)
+  , auth         :: !PartialAuthSection
   , workspacePath :: !(Last FilePath)
   , apiKey        :: !(Last ApiKey)
   , indexStrategy :: !(Last IndexStrategy)
@@ -433,7 +476,7 @@ instance Semigroup PartialConfig where
     , modelRoles    = a.modelRoles <> b.modelRoles
     , planningMode  = a.planningMode <> b.planningMode
     , sandboxMode   = a.sandboxMode <> b.sandboxMode
-    , authMode      = a.authMode <> b.authMode
+    , auth          = a.auth <> b.auth
     , workspacePath = a.workspacePath <> b.workspacePath
     , apiKey        = a.apiKey <> b.apiKey
     , indexStrategy = a.indexStrategy <> b.indexStrategy
@@ -454,7 +497,7 @@ instance Semigroup PartialConfig where
 instance Monoid PartialConfig where
   mempty = PartialConfig
     { provider = Last Nothing, modelRoles = Last Nothing, planningMode = Last Nothing
-    , sandboxMode = Last Nothing, authMode = Last Nothing, workspacePath = Last Nothing
+    , sandboxMode = Last Nothing, auth = mempty, workspacePath = Last Nothing
     , apiKey = Last Nothing, indexStrategy = Last Nothing, permissions = Last Nothing
     , mcpEndpoints = Last Nothing, server = mempty, telemetry = mempty, context = mempty
     , compaction = mempty, shell = mempty, session = mempty, guardrails = mempty

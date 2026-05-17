@@ -23,7 +23,7 @@ applyDefaults p = Config
   , modelRoles    = fromLast defaultConfig.modelRoles     p.modelRoles
   , planningMode  = fromLast defaultConfig.planningMode   p.planningMode
   , sandboxMode   = fromLast defaultConfig.sandboxMode    p.sandboxMode
-  , authMode      = fromLast defaultConfig.authMode       p.authMode
+  , authMode      = resolveAuth p.auth
   , workspacePath = fromLast defaultConfig.workspacePath  p.workspacePath
   , apiKey        = fromLast defaultConfig.apiKey          p.apiKey
   , indexStrategy = fromLast defaultConfig.indexStrategy   p.indexStrategy
@@ -149,6 +149,7 @@ validate cfg = concat
   , validateSampleRate "telemetry.sample_rate"        cfg.telemetry.sampleRate
   , checkPortConflict cfg
   , checkApiKey cfg
+  , validateAuth cfg
   ]
 
 validatePort :: Text -> Int -> [ConfigError]
@@ -181,6 +182,35 @@ checkApiKey :: Config -> [ConfigError]
 checkApiKey cfg =
   let ApiKey k = cfg.apiKey
   in if k == "" then [MissingRequired "api_key (set ANTHROPIC_API_KEY)"] else []
+
+resolveAuth :: PartialAuthSection -> AuthMode
+resolveAuth p = case fromLast "none" p.mode of
+  "jwt" -> JwtAuth JwtAuthConfig
+    { jwksSource = case (getLast p.jwksUri, getLast p.jwksInline, getLast p.secret) of
+        (Just uri, _, _)    -> JwksUri uri
+        (_, Just inline, _) -> JwksInline inline
+        (_, _, Just sec)    -> JwksHmacSecret sec
+        _                   -> JwksUri ""
+    , issuer          = fromLast Nothing p.issuer
+    , audience        = fromLast Nothing p.audience
+    , claimUserId     = fromLast "sub" p.claimUserId
+    , claimOrgId      = fromLast "org_id" p.claimOrgId
+    , claimRoles      = fromLast "roles" p.claimRoles
+    , cacheTtlSeconds = fromLast 300 p.cacheTtlSeconds
+    }
+  _ -> NoAuth
+
+validateAuth :: Config -> [ConfigError]
+validateAuth cfg = case cfg.authMode of
+  NoAuth -> []
+  JwtAuth jcfg -> concat
+    [ case jcfg.jwksSource of
+        JwksUri uri | uri == "" -> [MissingRequired "auth: one of jwks_uri, jwks_inline, or secret required"]
+        _ -> []
+    , if jcfg.cacheTtlSeconds <= 0
+        then [InvalidRange "auth.cache_ttl_seconds" "must be positive"]
+        else []
+    ]
 
 -- --------------------------------------------------------------------
 -- Helpers

@@ -22,12 +22,31 @@ loadFromEnv = do
   shellTo <- readEnvInt "CODESTAR_SHELL_DEFAULT_TIMEOUT"
   budgetSt <- readEnvInt "CODESTAR_BUDGET_MAX_STEPS"
 
+  authMode   <- readEnvText "CODESTAR_AUTH_MODE"
+  authJwksUri <- readEnvText "CODESTAR_AUTH_JWKS_URI"
+  authSecret <- readEnvText "CODESTAR_AUTH_SECRET"
+  authIssuer <- readEnvText "CODESTAR_AUTH_ISSUER"
+  authAudience <- readEnvText "CODESTAR_AUTH_AUDIENCE"
+
+  let authSection = PartialAuthSection
+        { mode            = Last authMode
+        , jwksUri         = Last authJwksUri
+        , jwksInline      = Last Nothing
+        , secret          = Last authSecret
+        , issuer          = Last (Just <$> authIssuer)
+        , audience        = Last (Just <$> authAudience)
+        , claimUserId     = Last Nothing
+        , claimOrgId      = Last Nothing
+        , claimRoles      = Last Nothing
+        , cacheTtlSeconds = Last Nothing
+        }
+
   let partial = PartialConfig
         (Last Nothing)
         (Last Nothing)
         (Last Nothing)
         (Last Nothing)
-        (Last Nothing)
+        authSection
         (Last Nothing)
         (Last (ApiKey <$> key))
         (Last Nothing)

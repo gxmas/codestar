@@ -76,7 +76,7 @@ cliToPartial args =
     (cliModelRoles args.cliModel)
     (Last Nothing)
     (Last Nothing)
-    (Last Nothing)
+    mempty
     (Last Nothing)
     (Last Nothing)
     (Last Nothing)
@@ -100,7 +100,7 @@ workspacePartial workspace =
     (Last Nothing)
     (Last Nothing)
     (Last Nothing)
-    (Last Nothing)
+    mempty
     (Last (Just workspace))
     (Last Nothing)
     (Last Nothing)

@@ -54,7 +54,11 @@ import CodeStar.LLM.Anthropic (newAnthropicClient)
 import CodeStar.LLM.Base (LlmError (..), buildResolver, withRetry)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
+import CodeStar.Config.Types (AuthMode (..), JwtAuthConfig (..))
 import CodeStar.Platform.Auth (AuthConfig (..), AuthResult (..), Identity (..), authenticate)
+import CodeStar.Platform.Auth.Jwks (newJwksCache)
+import CodeStar.Platform.Auth.Jwt (newJwtValidator, validateToken)
+import Network.HTTP.Client.TLS (newTlsManager)
 import CodeStar.Platform.CostTracker (newCostTracker)
 import CodeStar.Platform.Sandbox (Sandbox, noSandbox)
 import CodeStar.Platform.SessionManager qualified as SM
@@ -128,6 +132,13 @@ runServer runArgs = do
   (config :: Config) <- either (\e -> hPutStrLn stderr (show e) >> exitFailure) pure configResult
   (recorder, shutdownRecorder) <- mkRecorder config.telemetry
 
+  authCfg <- case config.authMode of
+    NoAuth -> pure NoAuthConfig
+    JwtAuth jcfg -> do
+      manager <- newTlsManager
+      cache <- newJwksCache manager jcfg.jwksSource jcfg.cacheTtlSeconds
+      pure (JwtConfig (validateToken (newJwtValidator cache jcfg)))
+
   let sessCfg = SM.SessionConfig
         { SM.maxSessionsPerUser = config.session.maxPerUser
         , SM.inactivityTimeout  = config.session.inactivityTimeout
@@ -141,7 +152,7 @@ runServer runArgs = do
       <> Text.pack (show port)
       <> "/agent"
 
-  let wsApp = makeWsApp config recorder sessionMgr shutdownVar
+  let wsApp = makeWsApp config authCfg recorder sessionMgr shutdownVar
       warpSettings =
         Warp.setPort port $
           Warp.setHost "*6" $
@@ -161,15 +172,14 @@ runServer runArgs = do
 -- WebSocket application
 -- --------------------------------------------------------------------
 
-makeWsApp :: AgentConfig -> TelemetryRecorder -> SessionManager -> TVar Bool -> WS.ServerApp
-makeWsApp config recorder sessionMgr shutdownVar pending = do
+makeWsApp :: AgentConfig -> AuthConfig -> TelemetryRecorder -> SessionManager -> TVar Bool -> WS.ServerApp
+makeWsApp config authCfg recorder sessionMgr shutdownVar pending = do
   isShuttingDown <- readTVarIO shutdownVar
   if isShuttingDown
     then WS.rejectRequest pending "Server shutting down"
     else do
       let headers = WS.requestHeaders (WS.pendingRequest pending)
           token = extractBearerFromHeaders headers
-          authCfg = NoAuthConfig
       authResult <- authenticate authCfg (maybe "" id token)
       case authResult of
         Unauthenticated reason -> do
