@@ -12,8 +12,7 @@
 --
 -- For selective imports, depend on the sub-packages directly and
 -- import from "Network.JsonRpc.Types", "Network.JsonRpc.Codec",
--- "Network.JsonRpc.Transport", "Network.JsonRpc.Server", or
--- "Network.JsonRpc.Client".
+-- "Network.JsonRpc.Transport", "Network.JsonRpc.Server", or "Network.JsonRpc.Client".
 module Network.JsonRpc
   ( -- * Re-exports from json-rpc-core
     module Network.JsonRpc.Types

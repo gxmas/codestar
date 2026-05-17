@@ -4,8 +4,6 @@ packages:
   libs/anthropic-sdk/anthropic-types
   libs/anthropic-sdk/anthropic-protocol
   libs/anthropic-sdk/anthropic-client
-  libs/anthropic-sdk/anthropic-server
-  libs/anthropic-sdk/anthropic-tools-common
 
   libs/json-rpc-sdk/json-rpc-core
   libs/json-rpc-sdk/json-rpc-client
@@ -19,17 +17,11 @@ packages:
   libs/mcp-sdk/mcp-transport-stdio
   libs/mcp-sdk/mcp-transport-http
   libs/mcp-sdk/mcp-session
-  libs/mcp-sdk/mcp-server
   libs/mcp-sdk/mcp-client
-  libs/mcp-sdk/mcp-host
   libs/mcp-sdk/mcp-auth
-  libs/mcp-sdk/mcp-tasks
 
-  libs/cache-core
-  libs/config-core
   libs/resilience
   libs/storage-core
-  libs/streaming-core
   libs/otel/otel-api
   libs/otel/otel-sdk-common
   libs/otel/otel-sdk-traces
@@ -42,4 +34,3 @@ packages:
 
   libs/tree-sitter
   libs/openai-sdk
-  libs/ollama-sdk
