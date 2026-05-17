@@ -12,6 +12,9 @@ module Network.MCP.Session.Connect
     -- * Connection
   , connect
   , disconnect
+
+    -- * Utilities
+  , sessionPing
   ) where
 
 import Control.Concurrent.Async (Async, async, cancel)
@@ -21,13 +24,16 @@ import Control.Concurrent.STM
   , putTMVar, readTVar, readTVarIO, takeTMVar, writeTVar, modifyTVar'
   )
 import Control.Exception (SomeException, catch)
+import System.Timeout (timeout)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Data.IORef (IORef, newIORef, atomicModifyIORef')
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Generics (Generic)
 import qualified Streaming.Prelude as SP
 
 import Network.MCP.Session
@@ -70,6 +76,7 @@ data ConnectConfig = ConnectConfig
   , connectClientCapabilities :: !ClientCapabilities
   , connectProtocolVersion :: !ProtocolVersion
   , connectTimeoutMs :: !(Maybe Word)
+  , connectSupportedVersions :: ![Text]
   }
 
 -- | Default connect configuration with empty capabilities and the
@@ -79,7 +86,8 @@ defaultConnectConfig info = ConnectConfig
   { connectClientInfo = info
   , connectClientCapabilities = ClientCapabilities Nothing Nothing Nothing Nothing Nothing
   , connectProtocolVersion = ProtocolVersion "2025-03-26"
-  , connectTimeoutMs = Nothing
+  , connectTimeoutMs = Just 30000
+  , connectSupportedVersions = ["2025-03-26", "2024-11-05"]
   }
 
 ------------------------------------------------------------------------
@@ -89,6 +97,7 @@ defaultConnectConfig info = ConnectConfig
 -- | Pending request: waiting for a response.
 data PendingEntry = PendingEntry
   { pendingResult :: !(TMVar (Either RPCError Aeson.Value))
+  , pendingOpts   :: !(Maybe RequestOptions)
   }
 
 -- | Mutable session state, shared between the reader thread and
@@ -96,6 +105,7 @@ data PendingEntry = PendingEntry
 data SessionState = SessionState
   { ssNextId :: !(IORef Int)
   , ssPending :: !(TVar (HashMap RequestId PendingEntry))
+  , ssProgressMap :: !(TVar (Map.Map ProgressToken RequestId))
   , ssRequestHandlers :: !(TVar (HashMap Text RequestHandler))
   , ssNotificationHandlers :: !(TVar (HashMap Text NotificationHandler))
   , ssCloseCallbacks :: !(TVar [CloseReason -> IO ()])
@@ -106,6 +116,7 @@ newSessionState :: IO SessionState
 newSessionState = do
   nextId <- newIORef 1
   pending <- newTVarIO HM.empty
+  progressMap <- newTVarIO Map.empty
   reqH <- newTVarIO HM.empty
   notifH <- newTVarIO HM.empty
   closeCbs <- newTVarIO []
@@ -113,6 +124,7 @@ newSessionState = do
   pure SessionState
     { ssNextId = nextId
     , ssPending = pending
+    , ssProgressMap = progressMap
     , ssRequestHandlers = reqH
     , ssNotificationHandlers = notifH
     , ssCloseCallbacks = closeCbs
@@ -123,6 +135,27 @@ nextRequestId :: SessionState -> IO RequestId
 nextRequestId ss = do
   n <- atomicModifyIORef' ss.ssNextId (\n -> (n + 1, n))
   pure (RequestId (Right n))
+
+------------------------------------------------------------------------
+-- Progress notification parsing
+------------------------------------------------------------------------
+
+-- | Internal type for deserializing progress notification params.
+data ProgressNotif = ProgressNotif
+  { pnToken    :: ProgressToken
+  , pnProgress :: Double
+  , pnTotal    :: Maybe Double
+  , pnMessage  :: Maybe Text
+  }
+  deriving stock (Generic)
+
+instance Aeson.FromJSON ProgressNotif where
+  parseJSON = Aeson.withObject "ProgressNotif" $ \o ->
+    ProgressNotif
+      <$> o Aeson..: "progressToken"
+      <*> o Aeson..: "progress"
+      <*> o Aeson..:? "total"
+      <*> o Aeson..:? "message"
 
 ------------------------------------------------------------------------
 -- Connection
@@ -156,7 +189,7 @@ connect transport cfg = do
         }
 
   -- Register pending entry
-  entry <- PendingEntry <$> newEmptyTMVarIO
+  entry <- PendingEntry <$> newEmptyTMVarIO <*> pure Nothing
   atomically $ modifyTVar' ss.ssPending (HM.insert reqId entry)
 
   -- Send the request
@@ -167,49 +200,65 @@ connect transport cfg = do
       pure (Left (SessionError SessionTransportError
         (T.pack ("Failed to send initialize: " <> show err))))
     Right () -> do
-      -- Wait for response
-      result <- atomically (takeTMVar entry.pendingResult)
-      case result of
-        Left rpcErr -> do
+      -- Wait for response (with timeout from config)
+      mResult <- case cfg.connectTimeoutMs of
+        Nothing -> Just <$> atomically (takeTMVar entry.pendingResult)
+        Just ms -> do
+          let microseconds = fromIntegral ms * 1000
+          timeout microseconds (atomically (takeTMVar entry.pendingResult))
+      case mResult of
+        Nothing -> do
+          -- Timeout: clean up pending entry and fail
+          atomically $ modifyTVar' ss.ssPending (HM.delete reqId)
           cancel reader
+          let ms = maybe 0 id cfg.connectTimeoutMs
           pure (Left (SessionError NotConnected
-            ("Initialize failed: " <> rpcErr.rpcErrorMessage)))
-        Right val -> do
-          -- Parse InitializeResult
-          case parseInitializeResult val of
-            Left parseErr -> do
-              cancel reader
-              pure (Left (SessionError NotConnected parseErr))
-            Right (serverVersion, serverCaps, serverInfo, _instructions) -> do
-              -- Check protocol version compatibility
-              if serverVersion /= cfg.connectProtocolVersion
-                then do
-                  cancel reader
-                  let ProtocolVersion cv = cfg.connectProtocolVersion
-                      ProtocolVersion sv = serverVersion
-                  pure (Left (SessionError VersionMismatch
-                    ("Client version " <> cv <> " != server version " <> sv)))
-                else do
-                  -- Send initialized notification
-                  let initializedNotif = MCPNotification JSONRPCNotification
-                        { notificationMethod = "notifications/initialized"
-                        , notificationParams = Nothing
-                        , notificationMeta = Nothing
-                        }
-                  _ <- send transport initializedNotif
+            ("Initialize timed out after " <> T.pack (show ms) <> "ms")))
+        Just result -> case result of
+          Left rpcErr -> do
+            cancel reader
+            pure (Left (SessionError NotConnected
+              ("Initialize failed: " <> rpcErr.rpcErrorMessage)))
+          Right val -> do
+            -- Parse InitializeResult
+            case parseInitializeResult val of
+              Left parseErr -> do
+                cancel reader
+                pure (Left (SessionError NotConnected parseErr))
+              Right (serverVersion, serverCaps, serverInfo, instructions) -> do
+                -- Check protocol version compatibility (multi-version negotiation)
+                let ProtocolVersion sv = serverVersion
+                if sv `notElem` cfg.connectSupportedVersions
+                  then do
+                    cancel reader
+                    pure (Left (SessionError VersionMismatch
+                      ("Server offered unsupported version: " <> sv)))
+                  else do
+                    -- Send initialized notification
+                    let initializedNotif = MCPNotification JSONRPCNotification
+                          { notificationMethod = "notifications/initialized"
+                          , notificationParams = Nothing
+                          , notificationMeta = Nothing
+                          }
+                    _ <- send transport initializedNotif
 
-                  let caps = NegotiatedCapabilities
-                        { negClient = cfg.connectClientCapabilities
-                        , negServer = serverCaps
-                        }
+                    let caps = NegotiatedCapabilities
+                          { negClient = cfg.connectClientCapabilities
+                          , negServer = serverCaps
+                          }
 
-                  -- Build the Session record
-                  let session = buildSession transport ss reader serverVersion serverInfo caps
-                  pure (Right session)
+                    -- Build the Session record
+                    let session = buildSession transport ss reader serverVersion serverInfo caps instructions cfg.connectTimeoutMs
+                    pure (Right session)
 
 -- | Close a session.
 disconnect :: Session -> IO ()
 disconnect s = s.sessionClose
+
+-- | Send a @ping@ request and await the pong. Returns @Right ()@ on
+-- success or @Left err@ on failure or timeout.
+sessionPing :: Session -> IO (Either RPCError ())
+sessionPing s = fmap (fmap (const ())) (s.sessionRequest "ping" Nothing Nothing)
 
 ------------------------------------------------------------------------
 -- Reader thread
@@ -243,6 +292,10 @@ handleInbound ss transport (Right msg) = case msg of
         Nothing -> pure Nothing
         Just entry -> do
           writeTVar ss.ssPending (HM.delete res.resultId pending)
+          -- Clean up progress map
+          case entry.pendingOpts >>= (.requestProgressToken) of
+            Just pt -> modifyTVar' ss.ssProgressMap (Map.delete pt)
+            Nothing -> pure ()
           pure (Just entry)
     case mEntry of
       Nothing -> pure ()  -- Unmatched response, ignore
@@ -260,6 +313,10 @@ handleInbound ss transport (Right msg) = case msg of
             Nothing -> pure Nothing
             Just entry -> do
               writeTVar ss.ssPending (HM.delete reqId pending)
+              -- Clean up progress map
+              case entry.pendingOpts >>= (.requestProgressToken) of
+                Just pt -> modifyTVar' ss.ssProgressMap (Map.delete pt)
+                Nothing -> pure ()
               pure (Just entry)
         case mEntry of
           Nothing -> pure ()
@@ -311,14 +368,36 @@ handleInbound ss transport (Right msg) = case msg of
             _ <- send transport resp
             pure ()
 
-  MCPNotification notif -> do
-    -- Dispatch to registered notification handler
-    handlers <- readTVarIO ss.ssNotificationHandlers
-    case HM.lookup notif.notificationMethod handlers of
-      Nothing -> pure ()  -- Unknown notifications are silently ignored
-      Just handler ->
-        handler (maybe Aeson.Null id notif.notificationParams)
-          `catch` (\(_ :: SomeException) -> pure ())
+  MCPNotification notif
+    | notif.notificationMethod == "notifications/progress" -> do
+        -- Dispatch progress to the requesting callback
+        let params = maybe Aeson.Null id notif.notificationParams
+        case Aeson.fromJSON @ProgressNotif params of
+          Aeson.Error _ -> pure ()  -- malformed, ignore
+          Aeson.Success pn -> do
+            mEntry <- atomically $ do
+              pm <- readTVar ss.ssProgressMap
+              case Map.lookup pn.pnToken pm of
+                Nothing -> pure Nothing
+                Just rid -> do
+                  pending <- readTVar ss.ssPending
+                  pure (HM.lookup rid pending)
+            case mEntry of
+              Nothing -> pure ()
+              Just entry ->
+                case entry.pendingOpts >>= (.requestOnProgress) of
+                  Nothing -> pure ()
+                  Just cb  -> cb pn.pnProgress pn.pnTotal pn.pnMessage
+                    `catch` (\(_ :: SomeException) -> pure ())
+
+    | otherwise -> do
+        -- Dispatch to registered notification handler
+        handlers <- readTVarIO ss.ssNotificationHandlers
+        case HM.lookup notif.notificationMethod handlers of
+          Nothing -> pure ()  -- Unknown notifications are silently ignored
+          Just handler ->
+            handler (maybe Aeson.Null id notif.notificationParams)
+              `catch` (\(_ :: SomeException) -> pure ())
 
 ------------------------------------------------------------------------
 -- Session builder
@@ -332,11 +411,14 @@ buildSession
   -> ProtocolVersion
   -> Implementation
   -> NegotiatedCapabilities
+  -> Maybe Text
+  -> Maybe Word
   -> Session
-buildSession transport ss reader version peerInfo caps = Session
+buildSession transport ss reader version peerInfo caps mInstructions defaultTimeoutMs = Session
   { sessionProtocolVersion = version
   , sessionPeerInfo = peerInfo
   , sessionCapabilities = caps
+  , sessionInstructions = mInstructions
 
   , sessionRequest = \method params opts -> do
       isClosed <- readTVarIO ss.ssClosed
@@ -348,8 +430,12 @@ buildSession transport ss reader version peerInfo caps = Session
           })
         else do
           reqId <- nextRequestId ss
-          entry <- PendingEntry <$> newEmptyTMVarIO
-          atomically $ modifyTVar' ss.ssPending (HM.insert reqId entry)
+          entry <- PendingEntry <$> newEmptyTMVarIO <*> pure opts
+          atomically $ do
+            modifyTVar' ss.ssPending (HM.insert reqId entry)
+            case opts >>= (.requestProgressToken) of
+              Just pt -> modifyTVar' ss.ssProgressMap (Map.insert pt reqId)
+              Nothing -> pure ()
 
           let reqMeta = case opts of
                 Nothing -> Nothing
@@ -370,8 +456,43 @@ buildSession transport ss reader version peerInfo caps = Session
                 , rpcErrorMessage = T.pack ("Transport error: " <> show err)
                 , rpcErrorData = Nothing
                 })
-            Right () ->
-              atomically (takeTMVar entry.pendingResult)
+            Right () -> do
+              -- Determine timeout: per-request overrides session default
+              let timeoutMs = case opts of
+                    Just o | Just ms <- o.requestTimeoutMs -> Just ms
+                    _ -> defaultTimeoutMs
+              case timeoutMs of
+                Nothing ->
+                  -- No timeout configured, block indefinitely
+                  atomically (takeTMVar entry.pendingResult)
+                Just ms -> do
+                  let microseconds = fromIntegral ms * 1000
+                  mResult <- timeout microseconds (atomically (takeTMVar entry.pendingResult))
+                  case mResult of
+                    Just result -> pure result
+                    Nothing -> do
+                      -- Timeout fired: clean up pending entry and progress map
+                      atomically $ do
+                        modifyTVar' ss.ssPending (HM.delete reqId)
+                        case opts >>= (.requestProgressToken) of
+                          Just pt -> modifyTVar' ss.ssProgressMap (Map.delete pt)
+                          Nothing -> pure ()
+                      -- Send cancellation notification
+                      let cancelParams = Aeson.object
+                            [ "requestId" Aeson..= reqId
+                            , "reason"    Aeson..= ("Request timed out" :: Text)
+                            ]
+                      let cancelNotif = MCPNotification JSONRPCNotification
+                            { notificationMethod = "notifications/cancelled"
+                            , notificationParams = Just cancelParams
+                            , notificationMeta = Nothing
+                            }
+                      _ <- send transport cancelNotif
+                      pure (Left RPCError
+                        { rpcErrorCode = -32603
+                        , rpcErrorMessage = "Request timed out after " <> T.pack (show ms) <> "ms"
+                        , rpcErrorData = Nothing
+                        })
 
   , sessionNotify = \method params -> do
       let notif = MCPNotification JSONRPCNotification
@@ -459,4 +580,3 @@ extractProgressToken (Just meta) =
     Just v -> case Aeson.fromJSON v of
       Aeson.Error _ -> Nothing
       Aeson.Success pt -> Just pt
-

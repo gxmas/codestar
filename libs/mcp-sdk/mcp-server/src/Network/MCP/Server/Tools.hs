@@ -59,42 +59,11 @@ import Text.Read (readMaybe)
 
 import Network.MCP.Session (RequestMeta (..), Session (..))
 import Network.MCP.Types (Cursor (..), RPCError (..))
-import Network.MCP.Types.Content (ContentBlock, Icon)
+import Network.MCP.Types.Content (ContentBlock, Icon, ToolAnnotations (..))
 
 ------------------------------------------------------------------------
 -- Types
 ------------------------------------------------------------------------
-
--- | Behavioral hints for tool annotations.
-data ToolAnnotations = ToolAnnotations
-  { toolReadOnly    :: !(Maybe Bool)
-  , toolDestructive :: !(Maybe Bool)
-  , toolIdempotent  :: !(Maybe Bool)
-  , toolOpenWorld   :: !(Maybe Bool)
-  }
-  deriving stock (Eq, Show)
-
-instance Aeson.ToJSON ToolAnnotations where
-  toJSON a =
-    Aeson.object $
-      maybe [] (\v -> ["readOnlyHint"    .= v]) a.toolReadOnly
-        ++ maybe [] (\v -> ["destructiveHint" .= v]) a.toolDestructive
-        ++ maybe [] (\v -> ["idempotentHint"  .= v]) a.toolIdempotent
-        ++ maybe [] (\v -> ["openWorldHint"   .= v]) a.toolOpenWorld
-  toEncoding a =
-    E.pairs $
-      foldMap ("readOnlyHint"    .=) a.toolReadOnly
-        <> foldMap ("destructiveHint" .=) a.toolDestructive
-        <> foldMap ("idempotentHint"  .=) a.toolIdempotent
-        <> foldMap ("openWorldHint"   .=) a.toolOpenWorld
-
-instance Aeson.FromJSON ToolAnnotations where
-  parseJSON = Aeson.withObject "ToolAnnotations" $ \o ->
-    ToolAnnotations
-      <$> o .:? "readOnlyHint"
-      <*> o .:? "destructiveHint"
-      <*> o .:? "idempotentHint"
-      <*> o .:? "openWorldHint"
 
 -- | Whether a tool supports task creation.
 data TaskSupportMode

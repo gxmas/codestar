@@ -14,7 +14,8 @@ import Test.QuickCheck
 
 import Network.MCP.Codec (McpCodec (..), Codec (..))
 import Network.MCP.Transport (Transport (..), TransportError (..), TransportErrorKind (..))
-import Network.MCP.Transport.Stdio (new, newWithHandles)
+import Network.MCP.Transport.Stdio (new, newWithHandles, stdioStderr)
+import System.Timeout (timeout)
 import Network.MCP.Types
 
 ------------------------------------------------------------------------
@@ -142,6 +143,55 @@ spec = do
       case result of
         Left err -> err.transportErrorKind `shouldBe` TransportClosed
         Right () -> expectationFailure "expected Left TransportClosed"
+
+  -- ── Gap 8: stdioStderr captures subprocess stderr ────────────────────
+  describe "stdioStderr" $ do
+    it "stdioStderr returns Nothing before subprocess writes to stderr" $ do
+      transport <- new "cat" []
+      result <- stdioStderr transport
+      result `shouldBe` Nothing
+      close transport
+
+    it "stdioStderr returns Just line when subprocess writes to stderr" $ do
+      transport <- new "sh" ["-c", "echo hello >&2"]
+      -- Wait for the subprocess to write and the drain loop to pick it up
+      let poll n
+            | n <= 0 = pure Nothing
+            | otherwise = do
+                r <- stdioStderr transport
+                case r of
+                  Just _  -> pure r
+                  Nothing -> threadDelay 50_000 >> poll (n - 1)
+      result <- poll (40 :: Int)  -- up to 2 seconds
+      close transport
+      case result of
+        Just line -> line `shouldSatisfy` T.isInfixOf "hello"
+        Nothing   -> expectationFailure "timed out waiting for stderr line"
+
+    it "stdioStderr returns Nothing for handle-based transport (newWithHandles)" $ do
+      (readEnd, writeEnd) <- createPipe
+      t <- newWithHandles writeEnd readEnd
+      result <- stdioStderr t
+      result `shouldBe` Nothing
+      close t
+
+  -- ── Gap 18: Shutdown sequence ──────────────────────────────────────────
+  describe "shutdown sequence" $ do
+    it "close sends SIGTERM to subprocess (does not hang)" $ do
+      transport <- new "sleep" ["30"]
+      result <- timeout 15_000_000 (close transport)
+      case result of
+        Just () -> pure ()
+        Nothing -> expectationFailure "close hung — SIGTERM not sent or process not killed"
+
+    it "close is idempotent for subprocess transport" $ do
+      transport <- new "cat" []
+      result <- timeout 5_000_000 $ do
+        close transport
+        close transport
+      case result of
+        Just () -> pure ()
+        Nothing -> expectationFailure "close hung on second call"
 
 ------------------------------------------------------------------------
 -- Helpers

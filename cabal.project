@@ -22,6 +22,7 @@ packages:
   libs/mcp-sdk/mcp-server
   libs/mcp-sdk/mcp-client
   libs/mcp-sdk/mcp-host
+  libs/mcp-sdk/mcp-auth
   libs/mcp-sdk/mcp-tasks
 
   libs/cache-core

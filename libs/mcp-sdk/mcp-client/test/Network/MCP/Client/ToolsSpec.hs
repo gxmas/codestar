@@ -20,11 +20,12 @@ import Network.MCP.Types.Capabilities
 ------------------------------------------------------------------------
 
 instance Aeson.ToJSON ClientToolDef where
-  toJSON t = Aeson.object
+  toJSON t = Aeson.object $
     [ "name"        Aeson..= t.ctdName
     , "description" Aeson..= t.ctdDescription
     , "inputSchema" Aeson..= t.ctdInputSchema
     ]
+      ++ maybe [] (\a -> ["annotations" Aeson..= a]) t.ctdAnnotations
 
 instance Aeson.ToJSON ClientResourceDef where
   toJSON r = Aeson.object
@@ -44,6 +45,7 @@ instance Arbitrary ClientToolDef where
       <$> (T.pack <$> listOf1 (elements ['a' .. 'z']))
       <*> oneof [pure Nothing, Just . T.pack <$> listOf1 (elements ['a' .. 'z'])]
       <*> pure (Aeson.object [])
+      <*> pure Nothing
 
 instance Arbitrary ClientResourceDef where
   arbitrary =
@@ -135,6 +137,7 @@ emptySession = Session
   , sessionCapabilities     = NegotiatedCapabilities
       (ClientCapabilities Nothing Nothing Nothing Nothing Nothing)
       (ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
+  , sessionInstructions     = Nothing
   , sessionRequest          = \_ _ _ -> pure (Left (RPCError (-32601) "not implemented" Nothing))
   , sessionNotify           = \_ _ -> pure ()
   , sessionCancel           = \_ _ -> pure ()
@@ -173,7 +176,7 @@ spec = do
 
   describe "callTool" $ do
     it "returns Right ToolCallResult for a registered tool" $ do
-      let tool    = ClientToolDef "my_tool" Nothing (Aeson.object [])
+      let tool    = ClientToolDef "my_tool" Nothing (Aeson.object []) Nothing
           session = mockToolSession [tool] 50
       result <- callTool session "my_tool" (Aeson.object [])
       case result of

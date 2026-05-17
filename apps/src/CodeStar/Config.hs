@@ -32,6 +32,7 @@ module CodeStar.Config
   , IndexStrategy (..)
   , SandboxMode (..)
   , AuthMode (..)
+  , McpAuthConfig (..)
   , McpEndpoint (..)
   , McpTransport (..)
   , ConfigError (..)

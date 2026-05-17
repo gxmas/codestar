@@ -19,9 +19,10 @@ import Data.Aeson ((.=), (.:?))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encoding as E
 import Data.Text (Text)
+import qualified Data.Text as T
 
 import Network.MCP.Session (Session (..))
-import Network.MCP.Types.Content (URI)
+import Network.MCP.Types.Content (URI (..))
 
 ------------------------------------------------------------------------
 -- Types
@@ -72,12 +73,21 @@ newRootsFeature p = do
   pure (RootsFeature p var)
 
 -- | Attach the feature to a session: registers the @roots/list@ handler.
+-- Non-@file://@ roots and roots with path traversal are filtered out.
 attach :: RootsFeature -> Session -> IO ()
 attach feat session = do
   atomically $ writeTVar feat.sessionVar (Just session)
   session.sessionOnRequest "roots/list" $ \_ _ -> do
     roots <- feat.provider.listRoots
-    pure (Right (Aeson.object ["roots" .= roots]))
+    let validRoots = filter (isValidRoot . (.rootUri)) roots
+    pure (Right (Aeson.object ["roots" .= validRoots]))
+  where
+    isValidRoot (URI t) =
+      "file://" `T.isPrefixOf` t
+        && not (hasTraversal t)
+    hasTraversal t =
+      let path = T.drop (T.length "file://") t
+      in ".." `elem` T.splitOn "/" path
 
 -- | Detach the feature from the current session.
 detach :: RootsFeature -> IO ()

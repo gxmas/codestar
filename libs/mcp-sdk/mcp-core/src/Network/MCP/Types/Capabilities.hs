@@ -63,28 +63,18 @@ instance Aeson.FromJSON RootsCapability where
   parseJSON = Aeson.withObject "RootsCapability" $ \o ->
     RootsCapability <$> o .:? "listChanged"
 
--- | Client sampling capability. Presence of sub-keys as booleans.
+-- | Client sampling capability. Per the MCP spec this is an empty
+-- object whose presence signals that the client supports sampling.
 data SamplingCapability = SamplingCapability
-  { samplingTools :: !Bool
-  , samplingContext :: !Bool
-  }
   deriving stock (Eq, Show, Generic)
 
 instance Aeson.ToJSON SamplingCapability where
-  toJSON sc =
-    Aeson.object $
-      (if sc.samplingTools then ["tools" .= Aeson.object []] else [])
-        ++ (if sc.samplingContext then ["context" .= Aeson.object []] else [])
-  toEncoding sc =
-    E.pairs $
-      (if sc.samplingTools then "tools" .= Aeson.object [] else mempty)
-        <> (if sc.samplingContext then "context" .= Aeson.object [] else mempty)
+  toJSON _ = Aeson.object []
+  toEncoding _ = E.pairs mempty
 
 instance Aeson.FromJSON SamplingCapability where
-  parseJSON = Aeson.withObject "SamplingCapability" $ \o ->
-    SamplingCapability
-      <$> pure (KM.member "tools" o)
-      <*> pure (KM.member "context" o)
+  parseJSON = Aeson.withObject "SamplingCapability" $ \_ ->
+    pure SamplingCapability
 
 -- | Client elicitation capability.
 data ElicitationCapability = ElicitationCapability

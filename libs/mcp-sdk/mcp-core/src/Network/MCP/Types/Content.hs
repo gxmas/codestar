@@ -19,6 +19,7 @@ module Network.MCP.Types.Content
 
     -- * Annotations
   , Annotations (..)
+  , ToolAnnotations (..)
   , Role (..)
 
     -- * Icons
@@ -27,6 +28,10 @@ module Network.MCP.Types.Content
 
     -- * URI
   , URI (..)
+
+    -- * URI validation
+  , validateUri
+  , defaultUriSchemeAllowlist
   ) where
 
 import Data.Aeson ((.=), (.:), (.:?))
@@ -51,6 +56,35 @@ import Network.MCP.Types (Timestamp)
 newtype URI = URI Text
   deriving stock (Eq, Ord, Show)
   deriving newtype (Aeson.ToJSON, Aeson.FromJSON)
+
+-- | Default allowed URI schemes for resource validation.
+-- An empty list means all schemes are permitted (the default).
+-- Operators may supply a non-empty list to restrict which schemes
+-- are accepted by their server.
+defaultUriSchemeAllowlist :: [Text]
+defaultUriSchemeAllowlist = []
+
+-- | Validate a URI text against an allowed-scheme list.
+-- Rejects: empty strings, no scheme, disallowed scheme (when allowlist
+-- is non-empty), and path traversal (".." segments in file:// URIs).
+-- An empty allowlist accepts all schemes.
+validateUri :: [Text] -> Text -> Either Text URI
+validateUri allowedSchemes t
+  | T.null t = Left "URI must not be empty"
+  | otherwise =
+      case T.breakOn ":" t of
+        (_, "") -> Left "URI has no scheme"
+        (scheme, rest) ->
+          if not (null allowedSchemes) && scheme `notElem` allowedSchemes
+            then Left ("URI scheme '" <> scheme <> "' is not allowed")
+            else if scheme == "file"
+              then
+                let path = T.drop (T.length "://") rest
+                    segs = T.splitOn "/" path
+                in if ".." `elem` segs
+                  then Left "URI contains path traversal ('..') segment"
+                  else Right (URI t)
+              else Right (URI t)
 
 ------------------------------------------------------------------------
 -- Role
@@ -122,6 +156,45 @@ instance Aeson.FromJSON Annotations where
       <$> o .:? "audience"
       <*> o .:? "priority"
       <*> o .:? "lastModified"
+
+------------------------------------------------------------------------
+-- ToolAnnotations
+------------------------------------------------------------------------
+
+-- | Behavioral hints for tool annotations (per MCP spec).
+data ToolAnnotations = ToolAnnotations
+  { toolTitle       :: !(Maybe Text)
+  , toolReadOnly    :: !(Maybe Bool)
+  , toolDestructive :: !(Maybe Bool)
+  , toolIdempotent  :: !(Maybe Bool)
+  , toolOpenWorld   :: !(Maybe Bool)
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance Aeson.ToJSON ToolAnnotations where
+  toJSON a =
+    Aeson.object $
+      maybe [] (\v -> ["title"           .= v]) a.toolTitle
+        ++ maybe [] (\v -> ["readOnlyHint"    .= v]) a.toolReadOnly
+        ++ maybe [] (\v -> ["destructiveHint" .= v]) a.toolDestructive
+        ++ maybe [] (\v -> ["idempotentHint"  .= v]) a.toolIdempotent
+        ++ maybe [] (\v -> ["openWorldHint"   .= v]) a.toolOpenWorld
+  toEncoding a =
+    E.pairs $
+      foldMap ("title"           .=) a.toolTitle
+        <> foldMap ("readOnlyHint"    .=) a.toolReadOnly
+        <> foldMap ("destructiveHint" .=) a.toolDestructive
+        <> foldMap ("idempotentHint"  .=) a.toolIdempotent
+        <> foldMap ("openWorldHint"   .=) a.toolOpenWorld
+
+instance Aeson.FromJSON ToolAnnotations where
+  parseJSON = Aeson.withObject "ToolAnnotations" $ \o ->
+    ToolAnnotations
+      <$> o .:? "title"
+      <*> o .:? "readOnlyHint"
+      <*> o .:? "destructiveHint"
+      <*> o .:? "idempotentHint"
+      <*> o .:? "openWorldHint"
 
 ------------------------------------------------------------------------
 -- Icon

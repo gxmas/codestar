@@ -42,6 +42,9 @@ library
     , streaming      >= 0.2
     , text           >= 2.0
 
+  if !os(windows)
+    build-depends: unix >= 2.7
+
 test-suite mcp-transport-stdio-test
   import:         warnings, extensions
   type:           exitcode-stdio-1.0

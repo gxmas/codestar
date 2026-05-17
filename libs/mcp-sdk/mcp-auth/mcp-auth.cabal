@@ -1,0 +1,72 @@
+cabal-version: 3.0
+name:          mcp-auth
+version:       0.1.0.0
+synopsis:      OAuth 2.1 authorization for the Model Context Protocol
+license:       MIT
+author:        Geoffrey Noel
+maintainer:    noel.geoff@gmail.com
+category:      Network
+build-type:    Simple
+
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
+
+common extensions
+  default-language:   GHC2021
+  default-extensions:
+    DeriveGeneric
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import:         warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    Network.MCP.Auth.Discovery
+    Network.MCP.Auth.Registration
+    Network.MCP.Auth.Pkce
+    Network.MCP.Auth.Flow
+  build-depends:
+    , aeson             >= 2.1
+    , base              >= 4.16 && < 5
+    , base64-bytestring >= 1.2
+    , bytestring        >= 0.11
+    , cryptohash-sha256 >= 0.11
+    , entropy           >= 0.4
+    , http-client       >= 0.7
+    , http-client-tls   >= 0.3
+    , http-types        >= 0.12
+    , network-uri       >= 2.6
+    , text              >= 2.0
+
+test-suite mcp-auth-test
+  import:         warnings, extensions
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  ghc-options:    -threaded
+  other-modules:
+    Network.MCP.Auth.DiscoverySpec
+    Network.MCP.Auth.FlowSpec
+    Network.MCP.Auth.PkceSpec
+  build-depends:
+    , aeson              >= 2.1
+    , base               >= 4.16 && < 5
+    , base64-bytestring  >= 1.2
+    , bytestring         >= 0.11
+    , cryptohash-sha256  >= 0.11
+    , hspec              >= 2.9
+    , http-client        >= 0.7
+    , http-types         >= 0.12
+    , mcp-auth
+    , QuickCheck         >= 2.14
+    , text               >= 2.0
+    , wai                >= 3.2
+    , warp               >= 3.3
+  build-tool-depends: hspec-discover:hspec-discover >= 2.9

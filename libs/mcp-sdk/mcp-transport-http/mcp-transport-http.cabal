@@ -29,38 +29,52 @@ library
   hs-source-dirs: src
   exposed-modules:
     Network.MCP.Transport.Http
+    Network.MCP.Transport.Http.Server
+    Network.MCP.Transport.Http.Streamable
 
   build-depends:
-    , aeson             >= 2.1
-    , async             >= 2.2
-    , base              >= 4.16 && < 5
-    , bytestring        >= 0.11
-    , case-insensitive  >= 1.2
-    , http-client       >= 0.7
-    , http-client-tls   >= 0.3
-    , http-types        >= 0.12
+    , aeson                  >= 2.1
+    , async                  >= 2.2
+    , base                   >= 4.16 && < 5
+    , bytestring             >= 0.11
+    , case-insensitive       >= 1.2
+    , http-client            >= 0.7
+    , http-client-tls        >= 0.3
+    , http-types             >= 0.12
     , mcp-core
+    , mcp-session
     , mcp-transport
-    , stm               >= 2.5
-    , streaming         >= 0.2
-    , text              >= 2.0
+    , stm                    >= 2.5
+    , streaming              >= 0.2
+    , text                   >= 2.0
+    , unordered-containers   >= 0.2
+    , uuid                   >= 1.3
+    , wai                    >= 3.2
 
 test-suite mcp-transport-http-test
   import:         warnings, extensions
   type:           exitcode-stdio-1.0
   hs-source-dirs: test
   main-is:        Spec.hs
-  other-modules:  Network.MCP.Transport.HttpSpec
+  other-modules:
+    Network.MCP.Transport.HttpSpec
+    Network.MCP.Transport.HttpServerSpec
+    Network.MCP.Transport.HttpStreamableSpec
   ghc-options:    -threaded
   build-depends:
+    , aeson                >= 2.1
+    , async                >= 2.2
     , base                 >= 4.16 && < 5
     , bytestring           >= 0.11
     , hspec                >= 2.9
+    , http-client          >= 0.7
     , http-types           >= 0.12
     , mcp-core
+    , mcp-session
     , mcp-transport
     , mcp-transport-http
     , QuickCheck           >= 2.14
+    , streaming            >= 0.2
     , text                 >= 2.0
     , wai                  >= 3.2
     , warp                 >= 3.3

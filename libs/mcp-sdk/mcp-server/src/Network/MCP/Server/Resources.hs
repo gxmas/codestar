@@ -8,7 +8,10 @@
 module Network.MCP.Server.Resources
   ( -- * Registry
     ResourceRegistry
+  , ResourceConfig (..)
+  , defaultResourceConfig
   , newResourceRegistry
+  , newResourceRegistryWith
   , registerResource
   , unregisterResource
   , registerTemplate
@@ -60,6 +63,8 @@ import Network.MCP.Types.Content
   , Icon
   , ResourceContents
   , URI (..)
+  , defaultUriSchemeAllowlist
+  , validateUri
   )
 
 ------------------------------------------------------------------------
@@ -168,6 +173,21 @@ data ResourceContext = ResourceContext
 type ResourceHandler = ResourceContext -> IO (Either RPCError [ResourceContents])
 
 ------------------------------------------------------------------------
+-- Configuration
+------------------------------------------------------------------------
+
+-- | Configuration for resource URI validation.
+data ResourceConfig = ResourceConfig
+  { rcUriSchemeAllowlist :: ![Text]
+  }
+
+-- | Default config: allows file, https, http, and git URIs.
+defaultResourceConfig :: ResourceConfig
+defaultResourceConfig = ResourceConfig
+  { rcUriSchemeAllowlist = defaultUriSchemeAllowlist
+  }
+
+------------------------------------------------------------------------
 -- Registry
 ------------------------------------------------------------------------
 
@@ -178,20 +198,37 @@ data ResourceRegistry = ResourceRegistry
   , rrTemplates   :: !(TVar [(ResourceTemplateDefinition, ResourceHandler)])
   , rrSubs        :: !(TVar (HashMap Text [URI -> IO ()]))
   , rrSession     :: !(TVar (Maybe Session))
+  , rrConfig      :: !ResourceConfig
   }
 
+-- | Create a registry with the default configuration.
 newResourceRegistry :: IO ResourceRegistry
-newResourceRegistry = do
+newResourceRegistry = newResourceRegistryWith defaultResourceConfig
+
+-- | Create a registry with a custom configuration.
+newResourceRegistryWith :: ResourceConfig -> IO ResourceRegistry
+newResourceRegistryWith cfg = do
   concTVar <- newTVarIO HM.empty
   tplTVar  <- newTVarIO []
   subTVar  <- newTVarIO HM.empty
   sesTVar  <- newTVarIO Nothing
-  pure (ResourceRegistry concTVar tplTVar subTVar sesTVar)
+  pure ResourceRegistry
+    { rrConcreteMap = concTVar
+    , rrTemplates   = tplTVar
+    , rrSubs        = subTVar
+    , rrSession     = sesTVar
+    , rrConfig      = cfg
+    }
 
--- | Register a concrete resource.
-registerResource :: ResourceRegistry -> ResourceDefinition -> ResourceHandler -> IO ()
+-- | Register a concrete resource. Returns Left if the URI is invalid.
+registerResource :: ResourceRegistry -> ResourceDefinition -> ResourceHandler -> IO (Either Text ())
 registerResource rr def handler =
-  atomically $ modifyTVar' rr.rrConcreteMap (HM.insert (uriText def.resUri) (def, handler))
+  case validateUri rr.rrConfig.rcUriSchemeAllowlist (uriText def.resUri) of
+    Left err -> pure (Left err)
+    Right _  -> do
+      atomically $ modifyTVar' rr.rrConcreteMap
+        (HM.insert (uriText def.resUri) (def, handler))
+      pure (Right ())
 
 -- | Unregister a concrete resource by URI.
 unregisterResource :: ResourceRegistry -> URI -> IO ()
@@ -273,31 +310,37 @@ handleRead rr params meta =
   case Aeson.fromJSON params of
     Aeson.Error err ->
       pure (Left (RPCError (-32602) (T.pack $ "Invalid params: " ++ err) Nothing))
-    Aeson.Success (ReadParams uri) -> do
-      entries <- readTVarIO rr.rrConcreteMap
-      case HM.lookup (uriText uri) entries of
-        Just (_def, handler) -> callHandler handler uri meta
-        Nothing -> do
-          templates <- readTVarIO rr.rrTemplates
-          case findTemplate uri templates of
-            Nothing ->
-              pure (Left (RPCError (-32002) ("Resource not found: " <> uriText uri) Nothing))
-            Just (_tpl, handler) -> callHandler handler uri meta
+    Aeson.Success (ReadParams uri) ->
+      case validateUri rr.rrConfig.rcUriSchemeAllowlist (uriText uri) of
+        Left err -> pure (Left (RPCError (-32602) err Nothing))
+        Right _  -> do
+          entries <- readTVarIO rr.rrConcreteMap
+          case HM.lookup (uriText uri) entries of
+            Just (_def, handler) -> callHandler handler uri meta
+            Nothing -> do
+              templates <- readTVarIO rr.rrTemplates
+              case findTemplate uri templates of
+                Nothing ->
+                  pure (Left (RPCError (-32002) ("Resource not found: " <> uriText uri) Nothing))
+                Just (_tpl, handler) -> callHandler handler uri meta
 
 handleSubscribe :: ResourceRegistry -> Aeson.Value -> RequestMeta -> IO (Either RPCError Aeson.Value)
 handleSubscribe rr params _meta =
   case Aeson.fromJSON params of
     Aeson.Error err ->
       pure (Left (RPCError (-32602) (T.pack $ "Invalid params: " ++ err) Nothing))
-    Aeson.Success (SubscribeParams uri) -> do
-      mSession <- readTVarIO rr.rrSession
-      let callback = \u -> case mSession of
-            Nothing      -> pure ()
-            Just session ->
-              session.sessionNotify "notifications/resources/updated"
-                (Just (Aeson.object ["uri" .= u]))
-      atomically $ modifyTVar' rr.rrSubs (HM.insertWith (++) (uriText uri) [callback])
-      pure (Right (Aeson.object []))
+    Aeson.Success (SubscribeParams uri) ->
+      case validateUri rr.rrConfig.rcUriSchemeAllowlist (uriText uri) of
+        Left err -> pure (Left (RPCError (-32602) err Nothing))
+        Right _  -> do
+          mSession <- readTVarIO rr.rrSession
+          let callback = \u -> case mSession of
+                Nothing      -> pure ()
+                Just session ->
+                  session.sessionNotify "notifications/resources/updated"
+                    (Just (Aeson.object ["uri" .= u]))
+          atomically $ modifyTVar' rr.rrSubs (HM.insertWith (++) (uriText uri) [callback])
+          pure (Right (Aeson.object []))
 
 handleUnsubscribe :: ResourceRegistry -> Aeson.Value -> RequestMeta -> IO (Either RPCError Aeson.Value)
 handleUnsubscribe rr params _meta =
@@ -305,7 +348,13 @@ handleUnsubscribe rr params _meta =
     Aeson.Error err ->
       pure (Left (RPCError (-32602) (T.pack $ "Invalid params: " ++ err) Nothing))
     Aeson.Success (SubscribeParams uri) -> do
-      atomically $ modifyTVar' rr.rrSubs (HM.delete (uriText uri))
+      atomically $ modifyTVar' rr.rrSubs $ \m ->
+        let key = uriText uri
+        in case HM.lookup key m of
+          Nothing -> m
+          Just [] -> HM.delete key m
+          Just [_] -> HM.delete key m
+          Just (_:rest) -> HM.insert key rest m
       pure (Right (Aeson.object []))
 
 callHandler :: ResourceHandler -> URI -> RequestMeta -> IO (Either RPCError Aeson.Value)
@@ -333,19 +382,54 @@ templateSegments tpl = go tpl []
             (_, "")     -> reverse (before : acc)
             (_, after)  -> go (T.drop 1 after) (before : acc)
 
--- | Check whether a URI matches a Level-1 template.
--- A URI matches if it starts with the first segment and ends with the
--- last segment (with content in between for each variable slot).
+-- RFC 6570 operator characters that may prefix variable expressions.
+rfc6570Operators :: String
+rfc6570Operators = "+#./;?&="
+
+-- | Internal: parse a template into alternating literals (Right) and
+-- variable names (Left), omitting empty literals.
+-- Strips RFC 6570 Level 2+ operator prefixes from variable names so
+-- that {+var}, {#var} etc. are treated the same as {var} for matching.
+templateParts :: Text -> [Either Text Text]
+templateParts tpl = go tpl []
+  where
+    go "" acc = reverse acc
+    go t acc = case T.breakOn "{" t of
+      (lit, "") -> reverse (addLit lit acc)
+      (lit, rest) ->
+        case T.breakOn "}" (T.drop 1 rest) of
+          (var, "") -> reverse (Left (stripOp var) : addLit lit acc)
+          (var, after) -> go (T.drop 1 after) (Left (stripOp var) : addLit lit acc)
+    addLit t acc
+      | T.null t  = acc
+      | otherwise = Right t : acc
+    stripOp v = case T.uncons v of
+      Just (c, rest) | c `elem` rfc6570Operators -> rest
+      _ -> v
+
+-- | Check whether a URI matches a Level-1 RFC 6570 template.
+-- Each variable slot may match any string (including empty).
+-- Uses backtracking so overlapping literals are handled correctly.
 matchesTemplate :: URI -> Text -> Bool
-matchesTemplate (URI uriTxt) tpl =
-  let segs = templateSegments tpl
-  in case segs of
-    []     -> True
-    [s]    -> uriTxt == s
-    (s:ss) ->
-      T.isPrefixOf s uriTxt
-        && T.isSuffixOf (last ss) uriTxt
-        && T.length uriTxt >= T.length s + T.length (last ss)
+matchesTemplate (URI uriTxt) tpl = go uriTxt (templateParts tpl)
+  where
+    go remaining [] = T.null remaining
+    go remaining (Right lit : rest)
+      | T.isPrefixOf lit remaining = go (T.drop (T.length lit) remaining) rest
+      | otherwise = False
+    go remaining (Left _ : rest) =
+      case dropWhile isVar rest of
+        []                          -> True
+        allRest@(Right nextLit : _) ->
+          any (\suf -> go suf allRest) (occurrences nextLit remaining)
+        _ -> True
+
+    isVar (Left _) = True
+    isVar _        = False
+
+    occurrences lit text = case T.breakOn lit text of
+      (_, "")   -> []
+      (_, rest) -> rest : occurrences lit (T.drop 1 rest)
 
 -- | Find the first template that matches the given URI.
 findTemplate

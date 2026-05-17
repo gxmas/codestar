@@ -104,6 +104,7 @@ library
     , hashable
     , json-rpc
     , json-schema-combinators
+    , mcp-auth
     , mcp-client
     , mcp-core
     , mcp-session
@@ -123,6 +124,7 @@ library
     , otel-exporter-prometheus
     , toml-reader >= 0.3
     , typed-process
+    , uuid >= 1.3
     , stm
     , text
     , time

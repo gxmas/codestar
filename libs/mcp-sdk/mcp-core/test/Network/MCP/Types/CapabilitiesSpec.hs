@@ -40,15 +40,28 @@ spec = do
     prop "roundtrip" $ \(x :: SamplingCapability) ->
       eitherDecode (encode x) === Right x
 
-    it "tools True includes 'tools' key" $ do
-      let v = toJSON (SamplingCapability True False)
-      lookupKey "tools" v `shouldBe` Just (Aeson.object [])
-      lookupKey "context" v `shouldBe` Nothing
+    it "serialises as empty object" $ do
+      let v = toJSON SamplingCapability
+      v `shouldBe` Aeson.object []
 
-    it "tools False omits 'tools' key" $ do
-      let v = toJSON (SamplingCapability False True)
-      lookupKey "tools" v `shouldBe` Nothing
-      lookupKey "context" v `shouldBe` Just (Aeson.object [])
+    -- Fix 3: SamplingCapability serialises as {} — verify the JSON
+    -- structure, not just round-trip equality (which is trivially true
+    -- for a nullary constructor).
+    it "toJSON produces exactly {} (Aeson.object [])" $
+      toJSON SamplingCapability `shouldBe` Aeson.object []
+
+    it "ClientCapabilities with sampling encodes sampling as {}" $ do
+      let cc = ClientCapabilities Nothing (Just SamplingCapability) Nothing Nothing Nothing
+          v  = toJSON cc
+      lookupKey "sampling" v `shouldBe` Just (Aeson.object [])
+
+    it "ClientCapabilities sampling key contains no extra keys" $ do
+      let cc = ClientCapabilities Nothing (Just SamplingCapability) Nothing Nothing Nothing
+          v  = toJSON cc
+      case lookupKey "sampling" v of
+        Just (Aeson.Object o) -> KM.size o `shouldBe` 0
+        other -> expectationFailure $
+          "Expected sampling to be an empty object, got: " ++ show other
 
   describe "NegotiatedCapabilities" $
     prop "roundtrip" $ \(x :: NegotiatedCapabilities) ->

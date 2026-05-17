@@ -18,6 +18,7 @@ common extensions
   default-extensions:
     DeriveGeneric
     DerivingStrategies
+    DuplicateRecordFields
     LambdaCase
     NoFieldSelectors
     OverloadedRecordDot
@@ -46,6 +47,7 @@ library
     , mcp-session
     , stm                  >= 2.5
     , text                 >= 2.0
+    , time                 >= 1.9
     , unordered-containers >= 0.2
 
 test-suite mcp-server-test
@@ -54,6 +56,7 @@ test-suite mcp-server-test
   hs-source-dirs: test
   main-is:        Spec.hs
   other-modules:
+    Network.MCP.Server.LoggingSpec
     Network.MCP.Server.ToolsSpec
     Network.MCP.Server.ResourcesSpec
   build-depends:

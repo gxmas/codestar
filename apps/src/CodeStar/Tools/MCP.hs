@@ -2,8 +2,10 @@ module CodeStar.Tools.MCP
   ( connectMcpEndpoints
   ) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, SomeException, try, throwIO)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTimeNSec)
+import System.IO (hFlush, hPutStr, hPutStrLn, stderr, stdout)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
@@ -16,8 +18,21 @@ import Network.MCP.Client.Tools qualified as MCPTools
 import Network.MCP.Session (Session)
 import Network.MCP.Session.Connect (defaultConnectConfig)
 import Network.MCP.Session.Connect qualified as MCPConnect
+import qualified Data.UUID.V4 as UUID
+import qualified Network.HTTP.Client.TLS as TLS
+
+import Network.MCP.Auth.Discovery
+  ( AuthServerMetadata (..)
+  , discoverMetadata
+  )
+import Network.MCP.Auth.Registration
+  (ClientRegistration (..), defaultClientMetadata, registerClient)
+import Network.MCP.Auth.Flow
+  (AuthConfig (..), TokenSet (..), buildAuthorizationUrl, exchangeCode)
+import Network.MCP.Auth.Pkce (generatePkce)
 import Network.MCP.Transport (Transport)
 import Network.MCP.Transport.Http qualified as Http
+import Network.MCP.Transport.Http.Streamable qualified as StreamableHttp
 import Network.MCP.Transport.Stdio qualified as Stdio
 import Network.MCP.Types (Implementation (..), RPCError (..))
 import Network.MCP.Types.Content (ContentBlock (..), ResourceLink (..), TextContent (..))
@@ -38,7 +53,7 @@ import OTel.Context (getCurrent)
 import Data.JsonSchema.Schema.Internal (emptySchema)
 import Data.JsonSchema.Serialization (decode)
 
-import CodeStar.Config (McpEndpoint (..), McpTransport (..))
+import CodeStar.Config (McpAuthConfig (..), McpEndpoint (..), McpTransport (..))
 import CodeStar.LLM.Base (ToolName (..))
 import OTel.Attribute (InstrumentationScope (..))
 import CodeStar.Telemetry (TelemetryRecorder (..))
@@ -125,6 +140,20 @@ openSession ep = do
       case result of
         Left ex -> pure (Left (show ex))
         Right t -> connectSession t cfg
+    StreamableHttpTransport ->
+      case ep.auth of
+        Nothing -> do
+          result <- try (StreamableHttp.new ep.command)
+            :: IO (Either IOException StreamableHttp.StreamableHttpTransport)
+          case result of
+            Left ex -> pure (Left (show ex))
+            Right t -> connectSession t cfg
+        Just authCfg -> do
+          result <- try (openAuthenticatedSession ep authCfg cfg)
+            :: IO (Either SomeException Session)
+          case result of
+            Left ex -> pure (Left (show ex))
+            Right s -> pure (Right s)
 
 connectSession ::
   (Transport t) =>
@@ -136,6 +165,86 @@ connectSession transport cfg = do
   case result of
     Left err -> pure (Left (show err))
     Right session -> pure (Right session)
+
+-- | Run the OAuth 2.1 PKCE flow interactively, then open an authenticated
+-- Streamable HTTP session to the MCP server.
+openAuthenticatedSession
+  :: McpEndpoint
+  -> McpAuthConfig
+  -> MCPConnect.ConnectConfig
+  -> IO Session
+openAuthenticatedSession ep authCfg connectCfg = do
+  manager <- TLS.newTlsManager
+
+  -- 1. Discover OAuth server metadata
+  metaResult <- discoverMetadata manager ep.command "2025-03-26"
+  meta <- case metaResult of
+    Left err -> throwIO (userError ("OAuth discovery failed: " <> Text.unpack err))
+    Right m  -> pure m
+
+  -- 2. Register client dynamically
+  let AuthServerMetadata
+        { asmAuthorizationEndpoint = authzEp
+        , asmTokenEndpoint         = tokenEp
+        , asmRegistrationEndpoint  = mRegEp
+        } = meta
+  let registrationEndpoint = case mRegEp of
+        Just ep_ -> ep_
+        Nothing  -> authzEp  -- fallback (unusual)
+  let clientMeta = defaultClientMetadata [authCfg.macRedirectUri]
+  regResult <- registerClient manager registrationEndpoint clientMeta
+  ClientRegistration { crClientId = clientId, crClientSecret = clientSecret } <-
+    case regResult of
+      Left err -> throwIO (userError ("OAuth registration failed: " <> Text.unpack err))
+      Right r  -> pure r
+
+  -- 3. Build auth config and PKCE challenge
+  let flowCfg = AuthConfig
+        { acClientId              = clientId
+        , acClientSecret          = clientSecret
+        , acRedirectUri           = authCfg.macRedirectUri
+        , acScopes                = authCfg.macScopes
+        , acAuthorizationEndpoint = authzEp
+        , acTokenEndpoint         = tokenEp
+        }
+  pkce  <- generatePkce
+  state <- Text.pack . show <$> UUID.nextRandom
+
+  -- 4. Prompt user to open the authorization URL
+  let authUrl = buildAuthorizationUrl flowCfg pkce state
+  hPutStrLn stderr ""
+  hPutStrLn stderr ("To connect to " <> Text.unpack ep.endpointName <>
+                    ", open this URL in your browser:")
+  hPutStrLn stderr ("  " <> Text.unpack authUrl)
+  hPutStrLn stderr ""
+  hPutStr   stderr "Authorization code: "
+  hFlush    stdout
+  code <- Text.pack <$> getLine
+
+  -- 5. Exchange code for tokens
+  tokenResult <- exchangeCode manager flowCfg pkce code
+  TokenSet { tsAccessToken = accessToken } <- case tokenResult of
+    Left err -> throwIO (userError ("Token exchange failed: " <> Text.unpack err))
+    Right ts -> pure ts
+
+  -- 6. Create transport with auth refresh action
+  tokenRef <- newIORef (Just accessToken)
+  let refreshAction = do
+        mTok <- readIORef tokenRef
+        case mTok of
+          Just tok -> do
+            writeIORef tokenRef Nothing
+            pure (Right tok)
+          Nothing  -> pure (Left
+            ("MCP session at " <> ep.endpointName <>
+             " requires re-authentication; restart CodeStar to reconnect."))
+  transport <- StreamableHttp.newWithAuth ep.command refreshAction
+
+  -- 7. Connect
+  connectResult <- MCPConnect.connect transport connectCfg
+  case connectResult of
+    Left err -> throwIO (userError (show err))
+    Right s  -> pure s
 
 codestarImpl :: Implementation
 codestarImpl =

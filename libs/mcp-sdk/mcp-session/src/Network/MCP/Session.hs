@@ -111,6 +111,7 @@ data Session = Session
   { sessionProtocolVersion :: !ProtocolVersion
   , sessionPeerInfo :: !Implementation
   , sessionCapabilities :: !NegotiatedCapabilities
+  , sessionInstructions :: !(Maybe Text)
   , sessionRequest :: Text -> Maybe Value -> Maybe RequestOptions -> IO (Either RPCError Value)
   , sessionNotify :: Text -> Maybe Value -> IO ()
   , sessionCancel :: RequestId -> Maybe Text -> IO ()

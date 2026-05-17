@@ -5,7 +5,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck ((===))
+import Test.QuickCheck ((===), (==>))
 
 import Network.MCP.Generators ()
 import Network.MCP.Types.Content
@@ -85,6 +85,33 @@ spec = do
   describe "EmbeddedResource" $
     prop "roundtrip" $ \(x :: EmbeddedResource) ->
       eitherDecode (encode x) === Right x
+
+  -- Fix 4: ToolAnnotations has a 'title' field that round-trips.
+  describe "ToolAnnotations" $ do
+    prop "roundtrip" $ \(x :: ToolAnnotations) ->
+      eitherDecode (encode x) === Right x
+
+    prop "title key present in JSON iff Just" $ \(x :: ToolAnnotations) ->
+      let v = toJSON x
+          hasKey = lookupKey "title" v /= Nothing
+      in hasKey === (x.toolTitle /= Nothing)
+
+    prop "title key absent in JSON when Nothing" $ \(x :: ToolAnnotations) ->
+      x.toolTitle == Nothing ==>
+        lookupKey "title" (toJSON x) === Nothing
+
+    it "all-Nothing encodes as {}" $ do
+      let ann = ToolAnnotations Nothing Nothing Nothing Nothing Nothing
+      toJSON ann `shouldBe` Aeson.object []
+
+    it "Just title round-trips through JSON" $ do
+      let ann = ToolAnnotations (Just "my-tool") Nothing Nothing Nothing Nothing
+      eitherDecode (encode ann) `shouldBe` Right ann
+
+    it "title value preserved in JSON" $ do
+      let ann = ToolAnnotations (Just "my-tool") Nothing Nothing Nothing Nothing
+          v   = toJSON ann
+      lookupKey "title" v `shouldBe` Just (Aeson.String "my-tool")
 
   describe "ContentBlock" $ do
     prop "roundtrip" $ \(x :: ContentBlock) ->

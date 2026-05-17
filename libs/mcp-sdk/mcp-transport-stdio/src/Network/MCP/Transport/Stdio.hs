@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- |
 -- Module      : Network.MCP.Transport.Stdio
 -- Stability   : experimental
@@ -8,19 +9,22 @@ module Network.MCP.Transport.Stdio
   ( StdioTransport
   , new
   , newWithHandles
+  , stdioStderr
   ) where
 
 import Control.Concurrent.Async (Async, async, cancel)
 import Control.Concurrent.STM
   ( TQueue, TVar
-  , atomically, newTQueueIO, newTVarIO
+  , atomically, isEmptyTQueue, newTQueueIO, newTVarIO
   , readTQueue, readTVar, writeTQueue, writeTVar
   )
 import Control.Exception (SomeException, catch, try)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
+import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Streaming as S
 import qualified Streaming.Prelude as SP
 import System.IO
@@ -29,8 +33,12 @@ import System.IO
   )
 import System.Process
   ( CreateProcess (..), ProcessHandle, StdStream (..)
-  , createProcess, proc, terminateProcess
+  , createProcess, getPid, proc, terminateProcess, waitForProcess
   )
+import System.Timeout (timeout)
+#ifndef mingw32_HOST_OS
+import System.Posix.Signals (sigKILL, signalProcess)
+#endif
 
 import Network.MCP.Codec (McpCodec (..), Codec (..))
 import Network.MCP.Transport
@@ -41,12 +49,15 @@ import Network.MCP.Types (MCPMessage)
 -- | A stdio transport that communicates with a subprocess via
 -- newline-delimited JSON on stdin/stdout.
 data StdioTransport = StdioTransport
-  { stStdin    :: !Handle          -- ^ subprocess stdin (we write)
-  , stStdout   :: !Handle          -- ^ subprocess stdout (we read)
-  , stProcess  :: !(Maybe ProcessHandle)
-  , stInbox    :: !(TQueue (Either TransportError MCPMessage))
-  , stIsClosed :: !(TVar Bool)
-  , stReader   :: !(Async ())
+  { stStdin        :: !Handle          -- ^ subprocess stdin (we write)
+  , stStdout       :: !Handle          -- ^ subprocess stdout (we read)
+  , stStderr       :: !(Maybe Handle)  -- ^ subprocess stderr handle (Nothing for newWithHandles)
+  , stProcess      :: !(Maybe ProcessHandle)
+  , stInbox        :: !(TQueue (Either TransportError MCPMessage))
+  , stIsClosed     :: !(TVar Bool)
+  , stReader       :: !(Async ())
+  , stStderrQueue  :: !(TQueue Text)        -- ^ lines drained from stderr
+  , stStderrReader :: !(Async ())           -- ^ background stderr drain thread
   }
 
 -- | Spawn a subprocess and create a stdio transport to communicate with it.
@@ -57,7 +68,7 @@ new cmd args = do
         , std_out = CreatePipe
         , std_err = CreatePipe
         }
-  (Just hin, Just hout, _herr, ph) <- createProcess cp
+  (Just hin, Just hout, Just herr, ph) <- createProcess cp
   hSetBinaryMode hin True
   hSetBinaryMode hout True
   hSetBuffering hin LineBuffering
@@ -65,13 +76,18 @@ new cmd args = do
   inbox <- newTQueueIO
   closed <- newTVarIO False
   reader <- async (readerLoop hout inbox closed)
+  stderrQ <- newTQueueIO
+  stderrReader <- async (stderrDrainLoop herr stderrQ)
   pure StdioTransport
-    { stStdin    = hin
-    , stStdout   = hout
-    , stProcess  = Just ph
-    , stInbox    = inbox
-    , stIsClosed = closed
-    , stReader   = reader
+    { stStdin        = hin
+    , stStdout       = hout
+    , stStderr       = Just herr
+    , stProcess      = Just ph
+    , stInbox        = inbox
+    , stIsClosed     = closed
+    , stReader       = reader
+    , stStderrQueue  = stderrQ
+    , stStderrReader = stderrReader
     }
 
 -- | Create a stdio transport from pre-existing handles. Useful for
@@ -86,13 +102,18 @@ newWithHandles writeHandle readHandle = do
   inbox <- newTQueueIO
   closed <- newTVarIO False
   reader <- async (readerLoop readHandle inbox closed)
+  stderrQ <- newTQueueIO
+  stderrReader <- async (pure ())
   pure StdioTransport
-    { stStdin    = writeHandle
-    , stStdout   = readHandle
-    , stProcess  = Nothing
-    , stInbox    = inbox
-    , stIsClosed = closed
-    , stReader   = reader
+    { stStdin        = writeHandle
+    , stStdout       = readHandle
+    , stStderr       = Nothing
+    , stProcess      = Nothing
+    , stInbox        = inbox
+    , stIsClosed     = closed
+    , stReader       = reader
+    , stStderrQueue  = stderrQ
+    , stStderrReader = stderrReader
     }
 
 -- | Background reader loop: reads newline-delimited JSON from stdout,
@@ -171,11 +192,66 @@ instance Transport StdioTransport where
       then pure ()
       else do
         cancel t.stReader
-        hClose t.stStdin `catch` ignoreAll
-        hClose t.stStdout `catch` ignoreAll
+        cancel t.stStderrReader
         case t.stProcess of
-          Just ph -> terminateProcess ph `catch` ignoreAll
-          Nothing -> pure ()
+          Nothing -> do
+            -- Handle-only transport: just close handles
+            hClose t.stStdin  `catch` ignoreAll
+            hClose t.stStdout `catch` ignoreAll
+            case t.stStderr of
+              Just herr -> hClose herr `catch` ignoreAll
+              Nothing   -> pure ()
+          Just ph -> do
+            -- Step 1: Close stdin to signal EOF to subprocess
+            hClose t.stStdin `catch` ignoreAll
+            -- Step 2: Wait up to 5 s for graceful exit
+            mExit <- timeout 5_000_000 (waitForProcess ph)
+            case mExit of
+              Just _  -> pure ()  -- Subprocess exited cleanly
+              Nothing -> do
+                -- Step 3: SIGTERM (Unix) / TerminateProcess (Windows)
+                terminateProcess ph `catch` ignoreAll
+                -- Step 4: Wait up to 2 s for SIGTERM to take effect
+                mExit2 <- timeout 2_000_000 (waitForProcess ph)
+                case mExit2 of
+                  Just _ -> pure ()
+                  Nothing ->
+#ifndef mingw32_HOST_OS
+                    -- Step 5 (Unix only): escalate to SIGKILL
+                    do mPid <- getPid ph
+                       case mPid of
+                         Just pid -> signalProcess sigKILL pid `catch` ignoreAll
+                         Nothing  -> pure ()
+#else
+                    pure ()
+#endif
+            hClose t.stStdout `catch` ignoreAll
+            case t.stStderr of
+              Just herr -> hClose herr `catch` ignoreAll
+              Nothing   -> pure ()
+
+-- | Read one line from the subprocess stderr buffer without blocking.
+-- Returns 'Nothing' when the buffer is empty.
+stdioStderr :: StdioTransport -> IO (Maybe Text)
+stdioStderr t = atomically $ do
+  empty <- isEmptyTQueue t.stStderrQueue
+  if empty then pure Nothing else Just <$> readTQueue t.stStderrQueue
+
+stderrDrainLoop :: Handle -> TQueue Text -> IO ()
+stderrDrainLoop herr q = go
+  where
+    go = do
+      eof <- hIsEOF herr `catch` (\(_ :: SomeException) -> pure True)
+      if eof
+        then pure ()
+        else do
+          line <- try (BS8.hGetLine herr)
+                    :: IO (Either SomeException BS8.ByteString)
+          case line of
+            Left _  -> pure ()
+            Right bs -> do
+              atomically (writeTQueue q (TE.decodeUtf8Lenient bs))
+              go
 
 ignoreAll :: SomeException -> IO ()
 ignoreAll _ = pure ()

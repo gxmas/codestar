@@ -45,6 +45,7 @@ module CodeStar.Config.Types
   , AuthMode (..)
 
     -- * MCP
+  , McpAuthConfig (..)
   , McpEndpoint (..)
   , McpTransport (..)
 
@@ -55,7 +56,8 @@ module CodeStar.Config.Types
   , RunArgs (..)
   ) where
 
-import Data.Aeson (FromJSON (..), withText)
+import Data.Aeson (FromJSON (..), (.:), (.:?), (.!=), withText)
+import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import Data.Monoid (Last (..))
 import Data.Set (Set)
@@ -129,14 +131,28 @@ data AuthMode = NoAuth
 -- MCP
 -- --------------------------------------------------------------------
 
-data McpTransport = StdioTransport | HttpTransport
+data McpTransport = StdioTransport | HttpTransport | StreamableHttpTransport
   deriving stock (Eq, Show, Generic)
 
 instance FromJSON McpTransport where
   parseJSON = withText "McpTransport" $ \case
-    "stdio" -> pure StdioTransport
-    "http"  -> pure HttpTransport
-    other   -> fail $ "Unknown McpTransport: " <> show other
+    "stdio"           -> pure StdioTransport
+    "http"            -> pure HttpTransport
+    "streamable-http" -> pure StreamableHttpTransport
+    other             -> fail $ "Unknown McpTransport: " <> show other
+
+-- | OAuth 2.1 auth config for an MCP endpoint.
+data McpAuthConfig = McpAuthConfig
+  { macRedirectUri :: !Text   -- ^ e.g. "http://localhost:9876/callback"
+  , macScopes      :: ![Text] -- ^ requested OAuth scopes
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance FromJSON McpAuthConfig where
+  parseJSON = Aeson.withObject "McpAuthConfig" $ \o ->
+    McpAuthConfig
+      <$> o .:  "redirectUri"
+      <*> o .:? "scopes" .!= []
 
 data McpEndpoint = McpEndpoint
   { endpointName :: !Text
@@ -144,6 +160,7 @@ data McpEndpoint = McpEndpoint
   , args         :: ![Text]
   , env          :: !(Map Text Text)
   , transport    :: !McpTransport
+  , auth         :: !(Maybe McpAuthConfig)
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON)
 

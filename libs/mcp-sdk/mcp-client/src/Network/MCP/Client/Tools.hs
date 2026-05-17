@@ -25,7 +25,7 @@ import qualified Data.Text as T
 
 import Network.MCP.Session (Session (..))
 import Network.MCP.Types (Cursor (..), RPCError (..))
-import Network.MCP.Types.Content (ContentBlock)
+import Network.MCP.Types.Content (ContentBlock, ToolAnnotations)
 
 ------------------------------------------------------------------------
 -- Types
@@ -36,6 +36,7 @@ data ClientToolDef = ClientToolDef
   { ctdName        :: !Text
   , ctdDescription :: !(Maybe Text)
   , ctdInputSchema :: !Aeson.Value
+  , ctdAnnotations :: !(Maybe ToolAnnotations)
   }
   deriving stock (Eq, Show)
 
@@ -45,6 +46,7 @@ instance Aeson.FromJSON ClientToolDef where
       <$> o .: "name"
       <*> o .:? "description"
       <*> o .: "inputSchema"
+      <*> o .:? "annotations"
 
 -- | Result of calling a tool on an MCP server.
 data ToolCallResult = ToolCallResult

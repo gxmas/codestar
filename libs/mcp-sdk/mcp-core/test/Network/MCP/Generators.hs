@@ -213,7 +213,7 @@ instance Arbitrary RootsCapability where
   arbitrary = RootsCapability <$> liftArbitrary arbitrary
 
 instance Arbitrary SamplingCapability where
-  arbitrary = SamplingCapability <$> arbitrary <*> arbitrary
+  arbitrary = pure SamplingCapability
 
 instance Arbitrary ElicitationCapability where
   arbitrary = ElicitationCapability <$> arbitrary <*> arbitrary
@@ -255,6 +255,15 @@ instance Arbitrary ServerCapabilities where
 
 instance Arbitrary NegotiatedCapabilities where
   arbitrary = NegotiatedCapabilities <$> arbitrary <*> arbitrary
+
+instance Arbitrary ToolAnnotations where
+  arbitrary =
+    ToolAnnotations
+      <$> liftArbitrary shortText
+      <*> liftArbitrary arbitrary
+      <*> liftArbitrary arbitrary
+      <*> liftArbitrary arbitrary
+      <*> liftArbitrary arbitrary
 
 instance Arbitrary TaskError where
   arbitrary = TaskError <$> arbitrary <*> shortText

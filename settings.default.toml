@@ -362,19 +362,38 @@
 #
 # Fields:
 #   name      — prefix applied to all tool names from this endpoint (required)
-#   transport — "stdio" (spawn subprocess) or "http" (connect to running server)
-#   command   — executable path (stdio) or base URL (http) (required)
+#   transport — "stdio" | "streamable-http" | "http"
+#   command   — executable path (stdio) or base URL (streamable-http / http) (required)
 #   args      — command-line arguments (stdio only)
 #   env       — additional environment variables passed to the subprocess
 #
-# Example — GitHub MCP server (official, https://github.com/github/github-mcp-server)
+# Transports:
+#   "streamable-http" — MCP spec 2025-03-26. POSTs every message to a fixed URL;
+#                       server responds with application/json or text/event-stream.
+#                       Use this for any server that implements the current spec,
+#                       including the GitHub MCP server HTTP mode.
+#   "stdio"           — spawns a subprocess and communicates via stdin/stdout.
+#   "http"            — legacy MCP HTTP+SSE protocol (spec <= 2024-11-05). Opens a
+#                       persistent SSE connection for server→client messages and POSTs
+#                       for client→server messages. Use only for older servers.
+#
+# Example — GitHub MCP server via Streamable HTTP (official hosted endpoint)
+# (https://github.com/github/github-mcp-server)
 # Exposes tools for repositories, issues, pull requests, code search, and
 # file operations. Tools are registered as github.create_issue,
 # github.search_code, github.get_pull_request, etc.
 #
 # Requires a GitHub personal access token with appropriate scopes
-# (repo, read:org, etc.). The token can also be supplied via the
-# GITHUB_PERSONAL_ACCESS_TOKEN environment variable instead of inline.
+# (repo, read:org, etc.).
+#
+# [[mcp]]
+# name      = "github"
+# transport = "streamable-http"
+# command   = "https://api.githubcopilot.com/mcp/"
+# args      = []
+# env       = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_your_token_here" }
+#
+# Example — GitHub MCP server via stdio (self-hosted, Docker):
 #
 # [[mcp]]
 # name      = "github"
@@ -383,27 +402,12 @@
 # args      = ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
 # env       = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_your_token_here" }
 #
-# Alternatively, if the github-mcp-server binary is installed locally:
-#
-# [[mcp]]
-# name      = "github"
-# transport = "stdio"
-# command   = "github-mcp-server"
-# args      = ["stdio"]
-# env       = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_your_token_here" }
-#
-# Example — generic HTTP endpoint (connects to a running server):
-#
-# NOTE: CodeStar's HTTP transport implements the MCP HTTP+SSE protocol
-# (spec <= 2024-11-05). It opens a persistent SSE connection for server→client
-# messages and sends client→server messages via HTTP POST. Servers that use
-# the newer Streamable HTTP transport (spec 2025-03-26) — such as the GitHub
-# MCP server's HTTP mode — are not compatible. Use stdio for those servers.
+# Example — generic Streamable HTTP endpoint:
 #
 # [[mcp]]
 # name      = "my-tools"
-# transport = "http"
-# command   = "http://localhost:8090"
+# transport = "streamable-http"
+# command   = "http://localhost:8090/mcp"
 # args      = []
 # env       = {}
 # ---------------------------------------------------------------------------

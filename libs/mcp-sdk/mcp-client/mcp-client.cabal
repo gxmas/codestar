@@ -50,6 +50,7 @@ test-suite mcp-client-test
   hs-source-dirs: test
   main-is:        Spec.hs
   other-modules:
+    Network.MCP.Client.RootsSpec
     Network.MCP.Client.ToolsSpec
   build-depends:
     , aeson                >= 2.1
