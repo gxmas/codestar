@@ -185,6 +185,7 @@ executable codestar-server
   main-is:        Server.hs
   other-modules:
       Server.AgentRunner
+    , Server.Commands
     , Server.SessionSetup
     , Server.WebSocket
   build-depends:

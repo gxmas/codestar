@@ -1,9 +1,8 @@
 module Main where
 
-import Control.Concurrent.STM (atomically, newTVarIO, writeTVar)
+import Control.Concurrent.STM (newTVarIO)
 import Control.Exception (SomeException, catch, finally)
 import GHC.Clock (getMonotonicTimeNSec)
-import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import System.Exit (exitFailure)
@@ -14,7 +13,8 @@ import Network.Wai.Handler.Warp qualified as Warp
 import Network.Wai.Handler.WebSockets qualified as WaiWs
 import Network.WebSockets qualified as WS
 
-import CodeStar.AgentSetup (buildClientForEntry, mkRecorder)
+import CodeStar.AgentSetup (mkRecorder)
+import Server.Commands (commandType, commandSessionId, setSessionModel)
 import Server.SessionSetup (spawnAgentSession)
 import Server.WebSocket (buildAuthConfig, makeWsApp)
 import CodeStar.Config
@@ -28,12 +28,10 @@ import CodeStar.Config
   , loadConfig
   , parseCliArgs
   )
-import CodeStar.Config.Types (ModelEntry (..))
 import CodeStar.Platform.Auth (Identity (..))
 import CodeStar.Platform.SessionManager qualified as SM
 import CodeStar.Platform.SessionManager
-  ( Session (..)
-  , SessionManager (..)
+  ( SessionManager (..)
   , approveSession
   , newSessionManager
   , rejectSession
@@ -49,7 +47,7 @@ import CodeStar.Transport.Types
   , CommandResult (..)
   )
 import CodeStar.Transport.WebSocket (websocketRecv, websocketSend)
-import CodeStar.Types (SessionId (..), UserId (..))
+import CodeStar.Types (UserId (..))
 
 -- --------------------------------------------------------------------
 -- Entry point
@@ -186,33 +184,5 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
   CmdSetModel{sessionId = sid, modelName = name} ->
     setSessionModel config sessionMgr sid name
 
--- --------------------------------------------------------------------
--- Command helpers
--- --------------------------------------------------------------------
-
-commandType :: Command -> Text
-commandType CmdSetModel{} = "setModel"
-commandType CmdStart{}   = "start"
-commandType CmdRespond{} = "respond"
-commandType CmdApprove{} = "approve"
-commandType CmdReject{}  = "reject"
-commandType CmdCompact{} = "compact"
-commandType CmdStop{}    = "stop"
-
-commandSessionId :: Command -> Text
-commandSessionId cmd = let SessionId s = cmd.sessionId in s
-
-setSessionModel :: AgentConfig -> SessionManager -> SessionId -> Text -> IO CommandResult
-setSessionModel config sessionMgr sid name = do
-  mSession <- sessionMgr.get sid
-  case mSession of
-    Nothing -> pure (CmdErr "Session not found")
-    Just session -> do
-      case filter (\m -> m.meName == name) config.models of
-        [] -> pure (CmdErr ("Unknown model: " <> name))
-        (entry:_) -> do
-          newClient <- buildClientForEntry config entry
-          atomically $ writeTVar session.pendingModel (Just (name, newClient))
-          pure CmdOk
 
 
