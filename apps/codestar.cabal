@@ -146,6 +146,7 @@ executable codestar-cli
     , CLI.FetchGrammars
     , CLI.Repl
     , CLI.Setup
+    , CLI.Telemetry
   build-depends:
       base
     , aeson

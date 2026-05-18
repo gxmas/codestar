@@ -20,12 +20,11 @@ import CodeStar.AgentLoop
   )
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CodeStar.Compaction qualified as Compaction
+import CLI.Telemetry (mkRecorder)
 import CodeStar.Config
   ( Config (..)
   , ApiKey (..)
   , BudgetSection (..)
-  , TelemetrySection (..)
-  , TelemetryMode (..)
   , ContextSection (..)
   , CompactionSection (..)
   , GuardrailsSection (..)
@@ -49,14 +48,7 @@ import CodeStar.RepoMap.CacheGc (CacheGcReport (..), runCacheGc)
 import CodeStar.RepoMap.Graph (querySourceModeLabel)
 import CodeStar.RepoMap.Worker (RepoMapWorker, enqueueFile, getCurrentMap, newRepoMapWorker)
 import CodeStar.Storage (StorageBackend, newBackend)
-import CodeStar.Telemetry
-  ( OtelSettings (..)
-  , TelemetryRecorder (..)
-  , jsonRecorder
-  , noOpRecorder
-  , otlpRecorderWithHandle
-  , shutdownTelemetry
-  )
+import CodeStar.Telemetry (TelemetryRecorder (..))
 import CodeStar.Telemetry qualified as Tel
 import CodeStar.Tools.Edit (editToolHandler)
 import CodeStar.Tools.Glob (globToolHandler)
@@ -242,32 +234,6 @@ buildSystemPrompt registry =
     , generateDocs registry
     ]
 
--- --------------------------------------------------------------------
--- Telemetry
--- --------------------------------------------------------------------
-
-mkRecorder :: TelemetrySection -> IO (TelemetryRecorder, IO ())
-mkRecorder tel = case tel.mode of
-  TelemetryOff -> pure (noOpRecorder, pure ())
-  TelemetryStderr -> pure (jsonRecorder, pure ())
-  TelemetryOtlp ->
-    mkOtelRecorder
-      OtelSettings
-        { serviceName = tel.serviceName
-        , endpoint = tel.endpoint
-        , logToStderr = tel.logToStderr
-        , metricsEnabled = tel.metricsEnabled
-        , metricsBindHost = tel.metricsBindHost
-        , metricsPort = tel.metricsPort
-        , sessionId = Nothing
-        , userId = Nothing
-        , tracesSampleRate = tel.sampleRate
-        }
-
-mkOtelRecorder :: OtelSettings -> IO (TelemetryRecorder, IO ())
-mkOtelRecorder settings = do
-  (recorder, handle) <- otlpRecorderWithHandle settings
-  pure (recorder, shutdownTelemetry handle)
 
 -- --------------------------------------------------------------------
 -- Event handler
