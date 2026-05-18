@@ -144,6 +144,7 @@ executable codestar-cli
   main-is:        CLI.hs
   other-modules:
       CLI.CacheGc
+    , CLI.Diagnostics
     , CLI.FetchGrammars
     , CLI.Repl
     , CLI.Setup
