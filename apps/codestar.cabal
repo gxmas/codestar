@@ -182,6 +182,7 @@ executable codestar-server
   import:         shared
   hs-source-dirs: codestar-serve
   main-is:        Server.hs
+  other-modules:  Server.SessionSetup
   build-depends:
       async
     , base
