@@ -7,6 +7,8 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ReaderT (..), asks, runReaderT)
 import Control.Exception (finally)
 import Data.IORef (IORef, readIORef)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.Console.Haskeline
@@ -43,6 +45,12 @@ data ReplEnv = ReplEnv
 
 type Repl a = ReaderT ReplEnv (InputT IO) a
 
+data SlashResult
+  = KeepSession SessionState
+  | ResetSession
+
+type SlashHandler = SessionState -> [Text] -> Repl SlashResult
+
 -- --------------------------------------------------------------------
 -- Entry point
 -- --------------------------------------------------------------------
@@ -73,7 +81,13 @@ replLoop session = do
 
 handleInput :: SessionState -> Text -> Repl ()
 handleInput session input
-  | Text.isPrefixOf "/" input = handleSlash session input
+  | Text.isPrefixOf "/" input = do
+      result <- dispatchSlash session input
+      case result of
+        KeepSession s -> replLoop s
+        ResetSession -> do
+          env <- asks reEnv
+          replLoop (sessionFromEnv env)
   | otherwise = do
       worker <- asks reWorker
       freshMap <- liftIO $ getCurrentMap worker
@@ -85,85 +99,139 @@ handleInput session input
       replLoop session'
 
 -- --------------------------------------------------------------------
--- Slash commands
+-- Slash command dispatch
 -- --------------------------------------------------------------------
 
-handleSlash :: SessionState -> Text -> Repl ()
-handleSlash session cmd = case Text.words cmd of
-  ["/cost"] -> do
-    costRef <- asks reCostRef
-    (inTok, outTok) <- liftIO (readIORef costRef)
-    liftInputT $ outputStrLn ("Input tokens:  " <> show inTok)
-    liftInputT $ outputStrLn ("Output tokens: " <> show outTok)
-    replLoop session
-  ["/clear"] -> do
-    liftInputT $ outputStrLn "[history cleared]"
-    env <- asks reEnv
-    replLoop (sessionFromEnv env)
-  ["/compact"] -> noopSlash "Compaction scheduled for next step" session
-  ("/compact" : _) -> noopSlash "Compaction scheduled for next step" session
-  ["/approve"] -> noopSlash "Approval granted" session
-  ["/reject", _] -> noopSlash "Rejection recorded" session
-  ["/mode", mode] -> noopSlash ("/mode " <> Text.unpack mode <> " noted") session
-  ["/repomap"] -> do
-    worker <- asks reWorker
-    mapText <- liftIO $ getCurrentMap worker
-    liftInputT $
-      if Text.null mapText
-        then outputStrLn "[repo map is empty - still indexing...]"
-        else outputStrLn (Text.unpack mapText)
-    replLoop session
-  ["/status"] -> do
-    worker <- asks reWorker
-    env <- asks reEnv
-    (filesIndexed, totalTags, pending, queueStatus) <- liftIO $ getWorkerStatus worker
-    let grammarsLoaded = grammarCount env.envGrammarReg
-    grammarDir <- liftIO grammarsDir
-    queryMode <- liftIO querySourceModeLabel
-    liftInputT $ do
-      outputStrLn $ "Grammars dir: " <> grammarDir
-      outputStrLn $ "Grammars loaded: " <> show grammarsLoaded <> " / " <> show (length knownGrammars)
-      mapM_ outputStrLn (grammarWarnings grammarDir grammarsLoaded)
-      outputStrLn $ "Query mode: " <> Text.unpack queryMode
-      outputStrLn $ "Files indexed: " <> show filesIndexed
-      outputStrLn $ "Total tags: " <> show totalTags
-      outputStrLn $ "Pending rebuild: " <> show pending
-      outputStrLn $ "Queue: " <> if queueStatus == 0 then "empty" else "processing"
-    replLoop session
-  ["/files"] -> do
-    worker <- asks reWorker
-    files <- liftIO $ getIndexedFiles worker
-    liftInputT $
-      if null files
-        then outputStrLn "[no files indexed yet]"
-        else mapM_ (outputStrLn . ("  " <>)) files
-    replLoop session
-  ["/rescan"] -> do
-    worker <- asks reWorker
-    liftInputT $ outputStrLn "[rescanning workspace...]"
-    liftIO $ enqueueAll worker
-    replLoop session
-  ["/help"] -> do
-    liftInputT $ do
-      outputStrLn "Commands:"
-      outputStrLn "  /cost              show token usage"
-      outputStrLn "  /clear             clear conversation history"
-      outputStrLn "  /compact [instr]   compact history"
-      outputStrLn "  /approve           approve pending tool call"
-      outputStrLn "  /reject [reason]   reject pending tool call"
-      outputStrLn "  /mode none|list|dag  planning mode"
-      outputStrLn "  /repomap           show current repo map"
-      outputStrLn "  /status            show indexing status"
-      outputStrLn "  /help              this help"
-    replLoop session
-  _ -> do
-    liftInputT $ outputStrLn ("Unknown: " <> Text.unpack cmd)
-    replLoop session
+slashCommands :: Map Text SlashHandler
+slashCommands = Map.fromList
+  [ ("/cost",    cmdCost)
+  , ("/clear",   cmdClear)
+  , ("/compact", cmdCompact)
+  , ("/approve", cmdApprove)
+  , ("/reject",  cmdReject)
+  , ("/mode",    cmdMode)
+  , ("/repomap", cmdRepoMap)
+  , ("/status",  cmdStatus)
+  , ("/files",   cmdFiles)
+  , ("/rescan",  cmdRescan)
+  , ("/help",    cmdHelp)
+  ]
 
-noopSlash :: String -> SessionState -> Repl ()
-noopSlash msg session = do
-  liftInputT $ outputStrLn ("[" <> msg <> "]")
-  replLoop session
+dispatchSlash :: SessionState -> Text -> Repl SlashResult
+dispatchSlash session cmd =
+  let ws = Text.words cmd
+      name = case ws of
+        (w : _) -> w
+        []      -> ""
+      args = drop 1 ws
+  in case Map.lookup name slashCommands of
+    Just handler -> handler session args
+    Nothing -> do
+      liftInputT $ outputStrLn ("Unknown: " <> Text.unpack cmd)
+      pure (KeepSession session)
+
+-- --------------------------------------------------------------------
+-- Slash command handlers
+-- --------------------------------------------------------------------
+
+cmdCost :: SlashHandler
+cmdCost session _args = do
+  costRef <- asks reCostRef
+  (inTok, outTok) <- liftIO (readIORef costRef)
+  liftInputT $ outputStrLn ("Input tokens:  " <> show inTok)
+  liftInputT $ outputStrLn ("Output tokens: " <> show outTok)
+  pure (KeepSession session)
+
+cmdClear :: SlashHandler
+cmdClear _session _args = do
+  liftInputT $ outputStrLn "[history cleared]"
+  pure ResetSession
+
+cmdCompact :: SlashHandler
+cmdCompact session _args = do
+  liftInputT $ outputStrLn "[Compaction scheduled for next step]"
+  pure (KeepSession session)
+
+cmdApprove :: SlashHandler
+cmdApprove session _args = do
+  liftInputT $ outputStrLn "[Approval granted]"
+  pure (KeepSession session)
+
+cmdReject :: SlashHandler
+cmdReject session _args = do
+  liftInputT $ outputStrLn "[Rejection recorded]"
+  pure (KeepSession session)
+
+cmdMode :: SlashHandler
+cmdMode session args = do
+  let mode = case args of
+        (m : _) -> Text.unpack m
+        []      -> "?"
+  liftInputT $ outputStrLn ("[/mode " <> mode <> " noted]")
+  pure (KeepSession session)
+
+cmdRepoMap :: SlashHandler
+cmdRepoMap session _args = do
+  worker <- asks reWorker
+  mapText <- liftIO $ getCurrentMap worker
+  liftInputT $
+    if Text.null mapText
+      then outputStrLn "[repo map is empty - still indexing...]"
+      else outputStrLn (Text.unpack mapText)
+  pure (KeepSession session)
+
+cmdStatus :: SlashHandler
+cmdStatus session _args = do
+  worker <- asks reWorker
+  env <- asks reEnv
+  (filesIndexed, totalTags, pending, queueStatus) <- liftIO $ getWorkerStatus worker
+  let grammarsLoaded = grammarCount env.envGrammarReg
+  grammarDir <- liftIO grammarsDir
+  queryMode <- liftIO querySourceModeLabel
+  liftInputT $ do
+    outputStrLn $ "Grammars dir: " <> grammarDir
+    outputStrLn $ "Grammars loaded: " <> show grammarsLoaded <> " / " <> show (length knownGrammars)
+    mapM_ outputStrLn (grammarWarnings grammarDir grammarsLoaded)
+    outputStrLn $ "Query mode: " <> Text.unpack queryMode
+    outputStrLn $ "Files indexed: " <> show filesIndexed
+    outputStrLn $ "Total tags: " <> show totalTags
+    outputStrLn $ "Pending rebuild: " <> show pending
+    outputStrLn $ "Queue: " <> if queueStatus == 0 then "empty" else "processing"
+  pure (KeepSession session)
+
+cmdFiles :: SlashHandler
+cmdFiles session _args = do
+  worker <- asks reWorker
+  files <- liftIO $ getIndexedFiles worker
+  liftInputT $
+    if null files
+      then outputStrLn "[no files indexed yet]"
+      else mapM_ (outputStrLn . ("  " <>)) files
+  pure (KeepSession session)
+
+cmdRescan :: SlashHandler
+cmdRescan session _args = do
+  worker <- asks reWorker
+  liftInputT $ outputStrLn "[rescanning workspace...]"
+  liftIO $ enqueueAll worker
+  pure (KeepSession session)
+
+cmdHelp :: SlashHandler
+cmdHelp session _args = do
+  liftInputT $ do
+    outputStrLn "Commands:"
+    outputStrLn "  /cost              show token usage"
+    outputStrLn "  /clear             clear conversation history"
+    outputStrLn "  /compact [instr]   compact history"
+    outputStrLn "  /approve           approve pending tool call"
+    outputStrLn "  /reject [reason]   reject pending tool call"
+    outputStrLn "  /mode none|list|dag  planning mode"
+    outputStrLn "  /repomap           show current repo map"
+    outputStrLn "  /status            show indexing status"
+    outputStrLn "  /files             list indexed files"
+    outputStrLn "  /rescan            rescan workspace"
+    outputStrLn "  /help              this help"
+  pure (KeepSession session)
 
 -- --------------------------------------------------------------------
 -- Helpers
