@@ -1,3 +1,25 @@
+{- |
+= Server.SessionSetup — per-session resource initialisation
+
+Each @CmdStart@ command allocates a __fresh, isolated set of resources__
+for the new agent session.  This module performs that allocation and wires
+everything together before handing off to 'runAgentWithTelemetry'.
+
+Compared to the CLI's "CLI.Setup", session setup has two additional concerns:
+
+  * __Input\/approval blocking__: the agent loop can pause and wait for the
+    client to send @CmdRespond@ or @CmdApprove@\/@CmdReject@.  This is
+    implemented with @MVar@s stored in the 'Session' record; the
+    @waitInput@ and @waitApproval@ callbacks block on them.
+
+  * __Event forwarding__: agent events are wrapped in 'AgentEventEnvelope'
+    (which tags them with the session ID) and sent back to the client as
+    JSON-RPC notifications via @eventSinkFn@.
+
+The heavy construction pattern here (many @let@ bindings, sequential IO
+actions) is intentional: each step produces a value used by the next, so
+there is no safe way to parallelise them.
+-}
 module Server.SessionSetup (spawnAgentSession) where
 
 import Control.Concurrent.MVar (takeMVar)
@@ -38,6 +60,26 @@ import CodeStar.Types (SessionId (..))
 import Resilience.Core (defaultRecoveryPolicy, newRecoveryEngine)
 
 
+-- | Initialise all per-session resources and spawn the agent thread.
+--
+-- This is called once per @CmdStart@ command.  It:
+--
+-- 1. Selects the active model entry from config and builds an LLM client
+--    wrapped with the retry/recovery engine.
+-- 2. Allocates per-session state: read tracker, todo store, permission
+--    store, cost tracker, memory store.
+-- 3. Loads Tree-sitter grammars and builds the initial repo-map snapshot
+--    synchronously (so the first agent turn has codebase context).
+-- 4. Connects to MCP endpoints and registers all tools.
+-- 5. Assembles the system prompt from template, repo map, and memory.
+-- 6. Constructs the 'AgentEnv' with blocking callbacks for
+--    @waitInput@ and @waitApproval@ — these are the hooks that allow the
+--    server to pause the agent and wait for client responses.
+-- 7. Calls 'runAgentWithTelemetry' to start the agent on a background
+--    thread and stores the thread handle in the session for cancellation.
+--
+-- Returns 'CmdOk' immediately; the agent runs asynchronously and sends
+-- progress back via @eventSinkFn@.
 spawnAgentSession ::
   AgentConfig ->
   TelemetryRecorder ->

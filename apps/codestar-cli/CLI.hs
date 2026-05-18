@@ -1,3 +1,20 @@
+{- |
+= codestar-cli — entry point
+
+The CLI application is the __local__ face of the coding-agent system.
+It reads a TOML config file, wires up all subsystems (LLM client,
+tool registry, repo-map worker, telemetry …), and then runs the agent
+in one of two modes:
+
+  * __Interactive (REPL)__: the user types tasks and slash commands at a
+    @codestar>@ prompt.  Good for exploratory, conversational sessions.
+  * __Headless__: a single task is supplied via @--task@ and the agent
+    exits with a UNIX exit code when it finishes.  Good for CI pipelines
+    and scripting.
+
+Utility sub-commands (@fetch-grammars@, @cache-gc@, @migrate-config@) are
+dispatched first; they do not start the agent loop.
+-}
 module Main where
 
 import Control.Exception (finally)
@@ -24,6 +41,9 @@ import CodeStar.Types (ControlSignal (..))
 -- Entry point
 -- --------------------------------------------------------------------
 
+-- | Parse CLI arguments and dispatch to the appropriate sub-command.
+-- Line-buffering is forced on stdout so that streaming LLM tokens
+-- appear immediately rather than being held in the OS buffer.
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
@@ -38,6 +58,13 @@ main = do
 -- run-agent command
 -- --------------------------------------------------------------------
 
+-- | Bootstrap all agent resources and choose interactive vs. headless mode.
+--
+-- 'buildCliResources' does the heavy lifting (LLM client, tool registry,
+-- repo-map worker …).  This function simply decides which front-end to
+-- attach: a full REPL or a single-shot headless run.
+-- 'finally' guarantees telemetry and background workers are shut down
+-- cleanly even if an exception propagates.
 runAgentCli :: RunArgs -> IO ()
 runAgentCli runArgs = do
   config <- loadConfigOrDie runArgs
@@ -58,6 +85,12 @@ runAgentCli runArgs = do
 -- Headless mode
 -- --------------------------------------------------------------------
 
+-- | Run the agent non-interactively with a single task string.
+--
+-- The exit code communicates the agent's terminal 'ControlSignal' to the
+-- calling process: 0 for 'Done', non-zero for 'Blocked' or unexpected
+-- signals.  This makes headless mode composable with shell scripts and
+-- CI jobs that check @$?@.
 runHeadless :: AgentEnv -> Text -> RunArgs -> IO ()
 runHeadless env sysPrompt runArgs = do
   let task = case runArgs.cliTask of

@@ -1,3 +1,28 @@
+{- |
+= Server.AgentRunner — async agent execution with telemetry
+
+This module wraps the core 'runAgent' call in the infrastructure needed
+for production server use:
+
+  * __Async execution__: each agent session runs in its own 'Async' thread
+    so the WebSocket handler can return immediately and the connection
+    remains responsive (e.g. to @CmdStop@).
+
+  * __OTel context propagation__: the span context from the WebSocket
+    connection is captured before the thread is spawned and re-attached
+    inside the new thread.  Without this, the agent's child spans would
+    appear as disconnected traces in the OTel backend.
+
+  * __Structured termination__: 'bracket_' guarantees that the session
+    count gauge is decremented and a termination event is recorded even if
+    the agent panics.  The termination reason (@\"done\"@, @\"blocked\"@,
+    @\"error\"@, @\"cancelled\"@) is stored in an 'IORef' and updated just
+    before the bracket exits.
+
+  * __Exception safety__: 'mask' / 'restore' ensure that the root span is
+    created atomically before any async exception can interrupt the thread,
+    preventing orphaned active spans.
+-}
 module Server.AgentRunner (runAgentWithTelemetry) where
 
 import Control.Concurrent.Async (Async, async)
@@ -16,6 +41,24 @@ import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
 import OTel.Attribute (AttributeValue (..))
 import OTel.Context (getCurrent, attach, detach)
 
+-- | Spawn an agent session as a background 'Async' thread, bracketed by
+-- telemetry instrumentation.
+--
+-- Parameters:
+--
+--   * @recorder@ — the OTel recorder; used for spans, events, and the
+--     session-count gauge.
+--   * @session@ — the session record from the 'SessionManager'; contains
+--     the @sessionId@, status @TVar@, and blocking @MVar@s.
+--   * @userId@ — attached to every span and event for multi-tenant tracing.
+--   * @eventSinkFn@ — callback that serialises 'AgentEventEnvelope' values
+--     and sends them back to the client as JSON-RPC notifications.
+--   * @env@ — the fully-initialised 'AgentEnv' (tools, LLM client, …).
+--   * @sysPrompt@ — the system prompt string.
+--   * @task@ — the initial user message that starts the agent turn.
+--
+-- Returns the 'Async' handle so the caller can store it (for cancellation)
+-- or wait on it.
 runAgentWithTelemetry ::
   TelemetryRecorder ->
   Session ->

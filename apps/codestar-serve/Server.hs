@@ -1,3 +1,44 @@
+{- |
+= codestar-serve — WebSocket agent server
+
+The server exposes the coding agent over a __WebSocket + JSON-RPC__
+protocol so that remote clients (IDEs, web frontends, other agents) can
+drive it without running a local process.
+
+== Architecture overview
+
+@
+  Client (IDE / browser)
+       │  WebSocket (JSON-RPC)
+       ▼
+  Server.WebSocket.makeWsApp        ← authenticates, accepts connection
+       │
+       ▼
+  handleConnection                  ← per-connection lifecycle + telemetry
+       │
+       ▼
+  handleCommand (dispatch)          ← routes JSON-RPC commands
+       │
+  ┌────┴──────────────────────────────┐
+  │ CmdStart → Server.SessionSetup    │  allocates per-session resources
+  │            Server.AgentRunner     │  spawns async agent thread
+  │ CmdRespond / Approve / Reject     │  unblocks waiting agent
+  │ CmdStop                           │  destroys session
+  └───────────────────────────────────┘
+@
+
+== Key design choices
+
+  * __One thread per session__: each agent run is an 'Async' thread.
+    The session manager tracks live threads and cancels them on @CmdStop@
+    or inactivity timeout.
+  * __Event sink__: the agent emits events (tokens, tool calls …) via a
+    callback that serialises them as JSON-RPC notifications and sends them
+    back over the same WebSocket connection.
+  * __Telemetry__: every connection and command is bracketed with
+    OpenTelemetry spans so latency and errors are observable in any OTel
+    backend.
+-}
 module Main where
 
 import Control.Concurrent.STM (newTVarIO)
@@ -53,6 +94,9 @@ import CodeStar.Types (UserId (..))
 -- Entry point
 -- --------------------------------------------------------------------
 
+-- | Parse CLI arguments and start the server.  Only the @run@ command
+-- is accepted; other sub-commands (e.g. @fetch-grammars@) belong to the
+-- CLI binary, not the server.
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
@@ -67,6 +111,18 @@ main = do
 -- Server
 -- --------------------------------------------------------------------
 
+-- | Bootstrap the server: load config, initialise telemetry and auth,
+-- create the session manager, and start Warp.
+--
+-- Warp is configured to:
+--
+--   * Listen on all IPv6 interfaces (@\"*6\"@), which also covers IPv4
+--     on dual-stack kernels.
+--   * Keep connections alive for up to 3600 seconds (long-lived WebSocket).
+--   * Allow 30 seconds for in-flight requests to drain on shutdown.
+--
+-- Non-WebSocket HTTP requests get a __426 Upgrade Required__ response,
+-- directing clients to use the WebSocket endpoint.
 runServer :: RunArgs -> IO ()
 runServer runArgs = do
   configResult <- loadConfig runArgs
@@ -108,6 +164,15 @@ runServer runArgs = do
 -- Connection handler
 -- --------------------------------------------------------------------
 
+-- | Manage the lifecycle of a single authenticated WebSocket connection.
+--
+-- The connection is wrapped in an OTel span so we can track its duration
+-- and attribute errors to it.  The JSON-RPC transport layer
+-- ('jsonRpcTransport') decodes incoming frames into typed 'Command' values
+-- and calls 'handleCommand' for each one.  The transport's 'listen' loop
+-- runs until the client disconnects or an exception occurs; 'finally'
+-- ensures the connection-close event is always recorded regardless of
+-- how the loop exits.
 handleConnection :: AgentConfig -> TelemetryRecorder -> SessionManager -> Identity -> WS.Connection -> IO ()
 handleConnection config recorder sessionMgr identity conn = do
   let UserId uid = identity.userId
@@ -155,6 +220,18 @@ handleConnection config recorder sessionMgr identity conn = do
 -- Command dispatch
 -- --------------------------------------------------------------------
 
+-- | Map each JSON-RPC 'Command' to the appropriate server action.
+--
+-- This is the protocol's __command dispatcher__ — the single function that
+-- decides what happens when the client sends a message.  Each branch is
+-- intentionally small; the real work is delegated to specialised modules:
+--
+--   * 'CmdStart' → 'spawnAgentSession' in "Server.SessionSetup"
+--   * 'CmdRespond', 'CmdApprove', 'CmdReject' → 'SessionManager'
+--   * 'CmdSetModel' → 'setSessionModel' in "Server.Commands"
+--
+-- 'CmdCompact' is acknowledged but currently a no-op at the server level;
+-- compaction is driven by the agent loop itself.
 handleCommand ::
   AgentConfig ->
   TelemetryRecorder ->
