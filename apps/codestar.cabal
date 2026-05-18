@@ -142,7 +142,9 @@ executable codestar-cli
   hs-source-dirs: codestar-cli
   main-is:        CLI.hs
   other-modules:
-      CLI.Repl
+      CLI.CacheGc
+    , CLI.FetchGrammars
+    , CLI.Repl
     , CLI.Setup
   build-depends:
       base
