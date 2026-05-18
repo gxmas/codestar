@@ -23,10 +23,8 @@ import CodeStar.Platform.Auth (Identity (..))
 import CodeStar.Platform.CostTracker (newCostTracker)
 import CodeStar.Platform.Sandbox (noSandbox)
 import CodeStar.Platform.SessionManager (Session (..), SessionStatus (..))
-import CodeStar.RepoMap.Cache (RepoMapCache (..), getOrComputeTags, newRepoMapCache)
-import CodeStar.RepoMap.Graph (buildSymbolGraph, defaultWeights, extractTags, pageRank)
-import CodeStar.RepoMap.Render (defaultRenderConfig, renderRepoMap)
-import CodeStar.RepoMap.Render qualified as RepoMap
+import CodeStar.RepoMap.Build (buildRepoMapSafe)
+import CodeStar.RepoMap.Cache (RepoMapCache (..), newRepoMapCache)
 import CodeStar.Storage (newBackend)
 import CodeStar.Telemetry (TelemetryRecorder (..))
 import CodeStar.Telemetry qualified as Tel
@@ -35,15 +33,10 @@ import CodeStar.Tools.Read (newReadTracker)
 import CodeStar.Tools.Registry (register)
 import CodeStar.Tools.TodoList (newTodoStore)
 import CodeStar.Transport.Types (AgentEventEnvelope (..), CommandResult (..))
-import CodeStar.TreeSitter (GrammarRegistry, loadGrammarRegistry)
+import CodeStar.TreeSitter (loadGrammarRegistry)
 import CodeStar.Types (SessionId (..))
 import Resilience.Core (defaultRecoveryPolicy, newRecoveryEngine)
 
-import Control.Monad (forM)
-import Data.ByteString qualified as BS
-import Data.List (isPrefixOf)
-import System.Directory (doesFileExist, listDirectory)
-import System.Timeout (timeout)
 
 spawnAgentSession ::
   AgentConfig ->
@@ -145,36 +138,3 @@ spawnAgentSession config recorder session identity eventSinkFn task = do
 
   pure CmdOk
 
--- --------------------------------------------------------------------
--- RepoMap utilities
--- --------------------------------------------------------------------
-
-listWorkspaceFiles :: FilePath -> IO [FilePath]
-listWorkspaceFiles root = do
-  entries <- listDirectory root
-  let visible = filter (not . ("." `isPrefixOf`)) entries
-  fmap concat $ forM visible $ \name -> do
-    let path = root </> name
-    isFile <- doesFileExist path
-    if isFile
-      then pure [path]
-      else listWorkspaceFiles path
-
-buildRepoMapSafe :: GrammarRegistry -> RepoMapCache -> FilePath -> IO Text
-buildRepoMapSafe grammarReg repoCache workDir = do
-  wsFiles <- listWorkspaceFiles workDir
-  result <- timeout 5000000 $ do
-    allTags <- fmap concat $ forM wsFiles $ \f -> do
-      src <- BS.readFile f
-      getOrComputeTags repoCache f (extractTags grammarReg f src)
-    let graph = buildSymbolGraph allTags
-        scores = pageRank graph [] [] defaultWeights
-    pure $!
-      renderRepoMap
-        allTags
-        scores
-        graph
-        defaultRenderConfig{RepoMap.maxTokens = 4096}
-  case result of
-    Just repoMap -> pure repoMap
-    Nothing -> pure Text.empty
