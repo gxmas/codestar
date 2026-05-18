@@ -5,9 +5,8 @@ import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (SomeException, bracket_, catch, finally, mask, try)
 import GHC.Clock (getMonotonicTimeNSec)
-import Control.Monad (void)
+import Control.Monad (forM, void)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Control.Monad (forM)
 import Data.ByteString qualified as BS
 import Data.List (isPrefixOf)
 import Data.Text (Text)
@@ -25,10 +24,8 @@ import Network.Wai.Handler.Warp qualified as Warp
 import Network.Wai.Handler.WebSockets qualified as WaiWs
 import Network.WebSockets qualified as WS
 
-import Data.IORef (newIORef)
 import CodeStar.AgentLoop (AgentEnv (..), AgentEvent (..), runAgent)
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
-import CodeStar.Compaction qualified as Compaction
 import CodeStar.Config.Paths qualified as Paths
 import CodeStar.Config
   ( Config (..)
@@ -36,9 +33,6 @@ import CodeStar.Config
   , ApiKey (..)
   , BudgetSection (..)
   , ServerSection (..)
-  , ContextSection (..)
-  , CompactionSection (..)
-  , GuardrailsSection (..)
   , SessionSection (..)
   , TelemetrySection (..)
   , TelemetryMode (..)
@@ -48,9 +42,8 @@ import CodeStar.Config
   , loadConfig
   , parseCliArgs
   )
+import CodeStar.Config.Convert (toContextConfig, toCompactionConfig, toGuardrailConfig)
 import CodeStar.Context (ContextParts (..), assemble)
-import CodeStar.Context qualified as CC
-import CodeStar.Guardrails qualified as GR
 import CodeStar.LLM.Anthropic (newAnthropicClient)
 import CodeStar.LLM.Base (LlmClientDict, LlmError (..), withDefaults, withRetry)
 import CodeStar.LLM.OpenAI (newOpenAIClient)
@@ -308,23 +301,9 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
         let onEdit = Just (repoCache.invalidate)
             registry = foldr register (buildRegistry tracker todoStore sandbox onEdit) mcpHandlers
 
-        let ctxCfg = CC.ContextConfig
-              { CC.maxContextTokens  = config.context.maxTokens
-              , CC.repoMapReserve    = config.context.repoMapReserve
-              , CC.memoryReserve     = config.context.memoryReserve
-              , CC.compactionReserve = config.context.compactionReserve
-              , CC.responseReserve   = config.context.responseReserve
-              }
-            compCfg = Compaction.CompactionConfig
-              { Compaction.triggerFraction  = config.compaction.triggerFraction
-              , Compaction.maxContextTokens = config.compaction.maxContextTokens
-              }
-            grCfg = GR.GuardrailConfig
-              { GR.denyList       = config.guardrails.denyList
-              , GR.allowList      = config.guardrails.allowList
-              , GR.allowedPaths   = Nothing
-              , GR.secretPatterns = config.guardrails.secretPatterns
-              }
+        let ctxCfg = toContextConfig config.context
+            compCfg = toCompactionConfig config.compaction
+            grCfg = toGuardrailConfig config.guardrails
 
         (_ctxMsgs, ctxParts) <-
           assemble
