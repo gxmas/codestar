@@ -141,6 +141,7 @@ executable codestar-cli
   import:         shared
   hs-source-dirs: codestar-cli
   main-is:        CLI.hs
+  other-modules:  CLI.Repl
   build-depends:
       base
     , aeson
@@ -149,6 +150,7 @@ executable codestar-cli
     , containers
     , filepath
     , haskeline
+    , mtl
     , stm
     , resilience
     , text

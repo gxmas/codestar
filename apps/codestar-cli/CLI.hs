@@ -1,32 +1,22 @@
 module Main where
 
-import Control.Monad.IO.Class (liftIO)
 import Control.Exception (finally)
 import Data.Aeson (encode)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef)
 import Data.ByteString.Lazy.Char8 qualified as BL8
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
-import System.Console.Haskeline
-  ( InputT
-  , defaultSettings
-  , getInputLine
-  , outputStrLn
-  , runInputT
-  )
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath ((</>))
 import System.IO (BufferMode (..), hFlush, hSetBuffering, stderr, stdout)
 
+import CLI.Repl (ReplEnv (..), runInteractive)
 import CodeStar.AgentLoop
   ( AgentEnv (..)
   , AgentEvent (..)
-  , SessionState
   , runAgent
-  , runAgentTurn
-  , sessionFromEnv
   )
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CodeStar.Compaction qualified as Compaction
@@ -63,7 +53,7 @@ import CodeStar.Platform.Sandbox (Sandbox, noSandbox)
 import CodeStar.RepoMap.Cache (RepoMapCache (..), newRepoMapCache)
 import CodeStar.RepoMap.CacheGc (CacheGcReport (..), StaleEntry (..), StaleReason (..), runCacheGc)
 import CodeStar.RepoMap.Graph (querySourceModeLabel)
-import CodeStar.RepoMap.Worker (RepoMapWorker, enqueueAll, enqueueFile, getCurrentMap, getIndexedFiles, getWorkerStatus, newRepoMapWorker, stopWorker)
+import CodeStar.RepoMap.Worker (enqueueFile, getCurrentMap, newRepoMapWorker)
 import CodeStar.Storage (StorageBackend, newBackend)
 import CodeStar.Telemetry
   ( OtelSettings (..)
@@ -277,9 +267,16 @@ runAgentCli runArgs = do
           , envPendingModel = pendingModelVar
           }
 
+  let renv = ReplEnv
+        { reEnv       = env
+        , reSysPrompt = sysPrompt
+        , reCostRef   = costRef
+        , reWorker    = repoWorker
+        }
+
   ( if runArgs.cliHeadless
       then runHeadless env sysPrompt runArgs
-      else runInteractive env sysPrompt costRef repoWorker
+      else runInteractive renv
     )
     `finally` shutdownRec
 
@@ -358,103 +355,6 @@ runHeadless env sysPrompt runArgs = do
     Blocked msg -> Text.IO.hPutStr stderr ("[blocked] " <> msg <> "\n") >> exitFailure
     _ -> exitFailure
 
--- --------------------------------------------------------------------
--- Interactive REPL
--- --------------------------------------------------------------------
-
-runInteractive :: AgentEnv -> Text -> IORef (Int, Int) -> RepoMapWorker -> IO ()
-runInteractive env sysPrompt costRef repoWorker = do
-  runInputT defaultSettings (replLoop env sysPrompt costRef repoWorker (sessionFromEnv env))
-    `finally` stopWorker repoWorker
-
-replLoop :: AgentEnv -> Text -> IORef (Int, Int) -> RepoMapWorker -> SessionState -> InputT IO ()
-replLoop env sysPrompt costRef repoWorker session = do
-  mLine <- getInputLine "\ncodestar> "
-  case mLine of
-    Nothing -> do
-      outputStrLn "Bye."
-      liftIO $ stopWorker repoWorker
-    Just line ->
-      let input = Text.strip (Text.pack line)
-       in if Text.null input
-            then replLoop env sysPrompt costRef repoWorker session
-            else handleInput env sysPrompt costRef repoWorker session input
-
-handleInput :: AgentEnv -> Text -> IORef (Int, Int) -> RepoMapWorker -> SessionState -> Text -> InputT IO ()
-handleInput env sysPrompt costRef repoWorker session input
-  | Text.isPrefixOf "/" input = handleSlash env sysPrompt costRef repoWorker session input
-  | otherwise = do
-      -- Get fresh repo map before each turn (background worker keeps it updated)
-      freshMap <- liftIO $ getCurrentMap repoWorker
-      let env' = env{envCompState = env.envCompState{csRepoMap = freshMap}}
-      (signal, session') <- liftIO (runAgentTurn env' sysPrompt session input)
-      outputStrLn ("\n[" <> Text.unpack (signalText signal) <> "]")
-      replLoop env sysPrompt costRef repoWorker session'
-
-handleSlash :: AgentEnv -> Text -> IORef (Int, Int) -> RepoMapWorker -> SessionState -> Text -> InputT IO ()
-handleSlash env sysPrompt costRef repoWorker session cmd = case Text.words cmd of
-  ["/cost"] -> do
-    (inTok, outTok) <- liftIO (readIORef costRef)
-    outputStrLn ("Input tokens:  " <> show inTok)
-    outputStrLn ("Output tokens: " <> show outTok)
-    replLoop env sysPrompt costRef repoWorker session
-  ["/clear"] -> do
-    outputStrLn "[history cleared]"
-    replLoop env sysPrompt costRef repoWorker (sessionFromEnv env)
-  ["/compact"] -> noopSlash "Compaction scheduled for next step" env sysPrompt costRef repoWorker session
-  ("/compact" : _) -> noopSlash "Compaction scheduled for next step" env sysPrompt costRef repoWorker session
-  ["/approve"] -> noopSlash "Approval granted" env sysPrompt costRef repoWorker session
-  ["/reject", _] -> noopSlash "Rejection recorded" env sysPrompt costRef repoWorker session
-  ["/mode", mode] -> noopSlash ("/mode " <> Text.unpack mode <> " noted") env sysPrompt costRef repoWorker session
-  ["/repomap"] -> do
-    mapText <- liftIO $ getCurrentMap repoWorker
-    if Text.null mapText
-      then outputStrLn "[repo map is empty - still indexing...]"
-      else outputStrLn (Text.unpack mapText)
-    replLoop env sysPrompt costRef repoWorker session
-  ["/status"] -> do
-    (filesIndexed, totalTags, pending, queueStatus) <- liftIO $ getWorkerStatus repoWorker
-    let grammarsLoaded = grammarCount env.envGrammarReg
-    grammarDir <- liftIO grammarsDir
-    queryMode <- liftIO querySourceModeLabel
-    outputStrLn $ "Grammars dir: " <> grammarDir
-    outputStrLn $ "Grammars loaded: " <> show grammarsLoaded <> " / " <> show (length knownGrammars)
-    mapM_ outputStrLn (grammarWarnings grammarDir grammarsLoaded)
-    outputStrLn $ "Query mode: " <> Text.unpack queryMode
-    outputStrLn $ "Files indexed: " <> show filesIndexed
-    outputStrLn $ "Total tags: " <> show totalTags
-    outputStrLn $ "Pending rebuild: " <> show pending
-    outputStrLn $ "Queue: " <> if queueStatus == 0 then "empty" else "processing"
-    replLoop env sysPrompt costRef repoWorker session
-  ["/files"] -> do
-    files <- liftIO $ getIndexedFiles repoWorker
-    if null files
-      then outputStrLn "[no files indexed yet]"
-      else mapM_ (outputStrLn . ("  " <>)) files
-    replLoop env sysPrompt costRef repoWorker session
-  ["/rescan"] -> do
-    outputStrLn "[rescanning workspace...]"
-    liftIO $ enqueueAll repoWorker
-    replLoop env sysPrompt costRef repoWorker session
-  ["/help"] -> do
-    outputStrLn "Commands:"
-    outputStrLn "  /cost              show token usage"
-    outputStrLn "  /clear             clear conversation history"
-    outputStrLn "  /compact [instr]   compact history"
-    outputStrLn "  /approve           approve pending tool call"
-    outputStrLn "  /reject [reason]   reject pending tool call"
-    outputStrLn "  /mode none|list|dag  planning mode"
-    outputStrLn "  /repomap           show current repo map"
-    outputStrLn "  /status            show indexing status"
-    outputStrLn "  /help              this help"
-    replLoop env sysPrompt costRef repoWorker session
-  _ -> do
-    outputStrLn ("Unknown: " <> Text.unpack cmd)
-    replLoop env sysPrompt costRef repoWorker session
-
-noopSlash :: String -> AgentEnv -> Text -> IORef (Int, Int) -> RepoMapWorker -> SessionState -> InputT IO ()
-noopSlash msg env sysPrompt costRef repoWorker session =
-  outputStrLn ("[" <> msg <> "]") >> replLoop env sysPrompt costRef repoWorker session
 
 -- --------------------------------------------------------------------
 -- Event handler
