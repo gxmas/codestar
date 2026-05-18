@@ -74,6 +74,7 @@ library
     CodeStar.Guardrails
     CodeStar.Permissions
     CodeStar.AgentLoop
+    CodeStar.AgentSetup
     CodeStar.Transport.Types
     CodeStar.Transport.JsonRpc
     CodeStar.Transport.WebSocket

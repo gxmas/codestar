@@ -17,42 +17,34 @@ import CodeStar.AgentLoop
   ( AgentEnv (..)
   , AgentEvent (..)
   )
+import CodeStar.AgentSetup (buildClientForEntry, buildRegistry, buildSystemPrompt, llmErrorLabel, mkRecorder)
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CLI.Diagnostics (printGrammarDiagnostics, printStaleFingerprintSafetyRail)
-import CLI.Telemetry (mkRecorder)
 import CodeStar.Config
   ( Config (..)
-  , ApiKey (..)
   , BudgetSection (..)
   , RunArgs (..)
   , loadConfig
   )
+import CodeStar.Config.Types (ModelEntry (..))
 import CodeStar.Config.Convert (toContextConfig, toCompactionConfig, toGuardrailConfig)
 import CodeStar.Config.Paths qualified as Paths
-import CodeStar.Config.Types (ModelEntry (..))
 import CodeStar.Context (ContextParts (..), assemble)
-import CodeStar.Guardrails qualified as GR
-import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (LlmClientDict, LlmError (..), ToolName (..), withDefaults, withRetry)
-import CodeStar.LLM.OpenAI (newOpenAIClient)
+import CodeStar.LLM.Base (LlmError (..), ToolName (..), withRetry)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
 import CodeStar.Platform.CostTracker (newCostTracker)
-import CodeStar.Platform.Sandbox (Sandbox, noSandbox)
+import CodeStar.Platform.Sandbox (noSandbox)
 import CodeStar.RepoMap.Cache (RepoMapCache (..), newRepoMapCache)
 import CodeStar.RepoMap.Graph (querySourceModeLabel)
 import CodeStar.RepoMap.Worker (RepoMapWorker, enqueueFile, getCurrentMap, newRepoMapWorker)
 import CodeStar.Storage (newBackend)
 import CodeStar.Telemetry (TelemetryRecorder (..))
 import CodeStar.Telemetry qualified as Tel
-import CodeStar.Tools.Edit (editToolHandler)
-import CodeStar.Tools.Glob (globToolHandler)
-import CodeStar.Tools.Grep (grepToolHandler)
 import CodeStar.Tools.MCP (connectMcpEndpoints)
-import CodeStar.Tools.Read (ReadTracker, newReadTracker, readToolHandler)
-import CodeStar.Tools.Registry
-import CodeStar.Tools.Shell (shellToolHandler)
-import CodeStar.Tools.TodoList (TodoStore, newTodoStore, todoListHandlers)
+import CodeStar.Tools.Read (newReadTracker)
+import CodeStar.Tools.Registry (register)
+import CodeStar.Tools.TodoList (newTodoStore)
 import CodeStar.TreeSitter (grammarCount, loadGrammarRegistry)
 import CodeStar.TreeSitter.Grammars (grammarsDir)
 import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
@@ -178,56 +170,6 @@ buildCliResources config _runArgs = do
     , crShutdown  = shutdownRec
     }
 
--- --------------------------------------------------------------------
--- LLM client construction
--- --------------------------------------------------------------------
-
-buildClientForEntry :: Config -> ModelEntry -> IO LlmClientDict
-buildClientForEntry config entry =
-  let ApiKey key = if unApiKey entry.meApiKey /= ""
-                   then entry.meApiKey
-                   else config.apiKey
-  in case entry.meProvider of
-    "anthropic" -> do
-      c <- newAnthropicClient key entry.meModel
-      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens c)
-    _ -> do
-      c <- newOpenAIClient key entry.meModel
-      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens c)
-
-llmErrorLabel :: LlmError -> Text
-llmErrorLabel (RateLimited _)         = "RateLimited"
-llmErrorLabel (AuthenticationFailed _) = "AuthenticationFailed"
-llmErrorLabel (ContextTooLong _ _)    = "ContextTooLong"
-llmErrorLabel (ContentFiltered _)     = "ContentFiltered"
-llmErrorLabel (InvalidRequest _)      = "InvalidRequest"
-llmErrorLabel (ProviderError _)       = "ProviderError"
-llmErrorLabel (NetworkError _)        = "NetworkError"
-
--- --------------------------------------------------------------------
--- Tool registry
--- --------------------------------------------------------------------
-
-buildRegistry :: ReadTracker -> TodoStore -> Sandbox -> Maybe (FilePath -> IO ()) -> ToolRegistry
-buildRegistry tracker todoStore sandbox mOnEdit =
-  register (readToolHandler tracker) $
-    register (editToolHandler tracker Nothing mOnEdit) $
-      register globToolHandler $
-        register grepToolHandler $
-          register (shellToolHandler sandbox) $
-            foldr register emptyRegistry (todoListHandlers todoStore)
-
-buildSystemPrompt :: ToolRegistry -> Text
-buildSystemPrompt registry =
-  Text.unlines
-    [ "You are CodeStar, an expert AI coding agent."
-    , "Work methodically: read files before editing, validate changes,"
-    , "and declare done only when you have evidence the task is complete."
-    , ""
-    , "## Available Tools"
-    , ""
-    , generateDocs registry
-    ]
 
 
 -- --------------------------------------------------------------------

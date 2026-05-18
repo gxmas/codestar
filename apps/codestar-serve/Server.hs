@@ -25,17 +25,15 @@ import Network.Wai.Handler.WebSockets qualified as WaiWs
 import Network.WebSockets qualified as WS
 
 import CodeStar.AgentLoop (AgentEnv (..), AgentEvent (..), runAgent)
+import CodeStar.AgentSetup (buildClientForEntry, buildRegistry, buildSystemPrompt, llmErrorLabel, mkRecorder)
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CodeStar.Config.Paths qualified as Paths
 import CodeStar.Config
   ( Config (..)
   , AgentConfig
-  , ApiKey (..)
   , BudgetSection (..)
   , ServerSection (..)
   , SessionSection (..)
-  , TelemetrySection (..)
-  , TelemetryMode (..)
   , CliArgs (..)
   , CliCommand (..)
   , RunArgs (..)
@@ -44,9 +42,7 @@ import CodeStar.Config
   )
 import CodeStar.Config.Convert (toContextConfig, toCompactionConfig, toGuardrailConfig)
 import CodeStar.Context (ContextParts (..), assemble)
-import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (LlmClientDict, LlmError (..), withDefaults, withRetry)
-import CodeStar.LLM.OpenAI (newOpenAIClient)
+import CodeStar.LLM.Base (LlmError (..), withRetry)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
 import CodeStar.Config.Types (AuthMode (..), JwtAuthConfig (..), ModelEntry (..))
@@ -73,24 +69,12 @@ import CodeStar.RepoMap.Render qualified as RepoMap
 import CodeStar.Storage (newBackend)
 import OTel.Attribute (AttributeValue (..))
 import OTel.Context (getCurrent, attach, detach)
-import CodeStar.Telemetry
-  ( OtelSettings (..)
-  , TelemetryRecorder (..)
-  , jsonRecorder
-  , noOpRecorder
-  , otlpRecorderWithHandle
-  , shutdownTelemetry
-  , signalLabel
-  )
+import CodeStar.Telemetry (TelemetryRecorder (..), signalLabel)
 import CodeStar.Telemetry qualified as Tel
-import CodeStar.Tools.Edit (editToolHandler)
-import CodeStar.Tools.Glob (globToolHandler)
-import CodeStar.Tools.Grep (grepToolHandler)
 import CodeStar.Tools.MCP (connectMcpEndpoints)
-import CodeStar.Tools.Read (ReadTracker, newReadTracker, readToolHandler)
-import CodeStar.Tools.Registry
-import CodeStar.Tools.Shell (shellToolHandler)
-import CodeStar.Tools.TodoList (TodoStore, newTodoStore, todoListHandlers)
+import CodeStar.Tools.Read (newReadTracker)
+import CodeStar.Tools.Registry (register)
+import CodeStar.Tools.TodoList (newTodoStore)
 import CodeStar.Transport.JsonRpc (encodeNotification, jsonRpcTransport)
 import CodeStar.Transport.Types
   ( AgentEventEnvelope (..)
@@ -451,83 +435,6 @@ setSessionModel config sessionMgr sid name = do
           atomically $ writeTVar session.pendingModel (Just (name, newClient))
           pure CmdOk
 
--- --------------------------------------------------------------------
--- Model client construction
--- --------------------------------------------------------------------
-
-buildClientForEntry :: AgentConfig -> ModelEntry -> IO LlmClientDict
-buildClientForEntry config entry =
-  let ApiKey key = if unApiKey entry.meApiKey /= ""
-                   then entry.meApiKey
-                   else config.apiKey
-  in case entry.meProvider of
-    "anthropic" -> do
-      client <- newAnthropicClient key entry.meModel
-      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
-    "openai" -> do
-      client <- newOpenAIClient key entry.meModel
-      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
-    _ -> do
-      client <- newOpenAIClient key entry.meModel
-      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
-
--- --------------------------------------------------------------------
--- LLM error labels (mirrored from CLI.hs)
--- --------------------------------------------------------------------
-
-llmErrorLabel :: LlmError -> Text
-llmErrorLabel (RateLimited _)         = "RateLimited"
-llmErrorLabel (AuthenticationFailed _) = "AuthenticationFailed"
-llmErrorLabel (ContextTooLong _ _)    = "ContextTooLong"
-llmErrorLabel (ContentFiltered _)     = "ContentFiltered"
-llmErrorLabel (InvalidRequest _)      = "InvalidRequest"
-llmErrorLabel (ProviderError _)       = "ProviderError"
-llmErrorLabel (NetworkError _)        = "NetworkError"
-
--- --------------------------------------------------------------------
--- Shared utilities (mirrored from CLI.hs)
--- --------------------------------------------------------------------
-
-buildRegistry :: ReadTracker -> TodoStore -> Sandbox -> Maybe (FilePath -> IO ()) -> ToolRegistry
-buildRegistry tracker todoStore sandbox mOnEdit =
-  register (readToolHandler tracker) $
-    register (editToolHandler tracker Nothing mOnEdit) $
-      register globToolHandler $
-        register grepToolHandler $
-          register (shellToolHandler sandbox) $
-            foldr register emptyRegistry (todoListHandlers todoStore)
-
-buildSystemPrompt :: ToolRegistry -> Text
-buildSystemPrompt registry =
-  Text.unlines
-    [ "You are CodeStar, an expert AI coding agent."
-    , "Work methodically: read files before editing, validate changes,"
-    , "and declare done only when you have evidence the task is complete."
-    , ""
-    , "## Available Tools"
-    , ""
-    , generateDocs registry
-    ]
-
-mkRecorder :: TelemetrySection -> IO (TelemetryRecorder, IO ())
-mkRecorder tel = case tel.mode of
-  TelemetryOff -> pure (noOpRecorder, pure ())
-  TelemetryStderr -> pure (jsonRecorder, pure ())
-  TelemetryOtlp -> do
-    (recorder, handle) <-
-      otlpRecorderWithHandle
-        OtelSettings
-          { serviceName = tel.serviceName
-          , endpoint = tel.endpoint
-          , logToStderr = tel.logToStderr
-          , metricsEnabled = tel.metricsEnabled
-          , metricsBindHost = tel.metricsBindHost
-          , metricsPort = tel.metricsPort
-          , sessionId = Nothing
-          , userId = Nothing
-          , tracesSampleRate = tel.sampleRate
-          }
-    pure (recorder, shutdownTelemetry handle)
 
 listWorkspaceFiles :: FilePath -> IO [FilePath]
 listWorkspaceFiles root = do
