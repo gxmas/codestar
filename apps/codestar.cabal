@@ -185,6 +185,7 @@ executable codestar-server
   other-modules:
       Server.AgentRunner
     , Server.SessionSetup
+    , Server.WebSocket
   build-depends:
       async
     , base

@@ -1,12 +1,10 @@
 module Main where
 
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
-import Control.Exception (SomeException, catch, finally, try)
+import Control.Concurrent.STM (atomically, newTVarIO, writeTVar)
+import Control.Exception (SomeException, catch, finally)
 import GHC.Clock (getMonotonicTimeNSec)
-import Control.Monad (void)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as Text.IO
 import System.Exit (exitFailure)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
@@ -18,6 +16,7 @@ import Network.WebSockets qualified as WS
 
 import CodeStar.AgentSetup (buildClientForEntry, mkRecorder)
 import Server.SessionSetup (spawnAgentSession)
+import Server.WebSocket (buildAuthConfig, makeWsApp)
 import CodeStar.Config
   ( Config (..)
   , AgentConfig
@@ -29,11 +28,8 @@ import CodeStar.Config
   , loadConfig
   , parseCliArgs
   )
-import CodeStar.Config.Types (AuthMode (..), JwtAuthConfig (..), ModelEntry (..))
-import CodeStar.Platform.Auth (AuthConfig (..), AuthResult (..), Identity (..), authenticate)
-import CodeStar.Platform.Auth.Jwks (newJwksCache)
-import CodeStar.Platform.Auth.Jwt (newJwtValidator, validateToken)
-import Network.HTTP.Client.TLS (newTlsManager)
+import CodeStar.Config.Types (ModelEntry (..))
+import CodeStar.Platform.Auth (Identity (..))
 import CodeStar.Platform.SessionManager qualified as SM
 import CodeStar.Platform.SessionManager
   ( Session (..)
@@ -48,8 +44,7 @@ import CodeStar.Telemetry (TelemetryRecorder (..))
 import CodeStar.Telemetry qualified as Tel
 import CodeStar.Transport.JsonRpc (encodeNotification, jsonRpcTransport)
 import CodeStar.Transport.Types
-  ( AgentEventEnvelope (..)
-  , AgentTransportDict (..)
+  ( AgentTransportDict (..)
   , Command (..)
   , CommandResult (..)
   )
@@ -79,13 +74,7 @@ runServer runArgs = do
   configResult <- loadConfig runArgs
   (config :: Config) <- either (\e -> hPutStrLn stderr (show e) >> exitFailure) pure configResult
   (recorder, shutdownRecorder) <- mkRecorder config.telemetry
-
-  authCfg <- case config.authMode of
-    NoAuth -> pure NoAuthConfig
-    JwtAuth jcfg -> do
-      manager <- newTlsManager
-      cache <- newJwksCache manager jcfg.jwksSource jcfg.cacheTtlSeconds
-      pure (JwtConfig (validateToken (newJwtValidator cache jcfg)))
+  authCfg <- buildAuthConfig config
 
   let sessCfg = SM.SessionConfig
         { SM.maxSessionsPerUser = config.session.maxPerUser
@@ -100,7 +89,7 @@ runServer runArgs = do
       <> Text.pack (show port)
       <> "/agent"
 
-  let wsApp = makeWsApp config authCfg recorder sessionMgr shutdownVar
+  let wsApp = makeWsApp config authCfg recorder sessionMgr shutdownVar handleConnection
       warpSettings =
         Warp.setPort port $
           Warp.setHost "*6" $
@@ -116,37 +105,6 @@ runServer runArgs = do
     )
     `finally` shutdownRecorder
 
--- --------------------------------------------------------------------
--- WebSocket application
--- --------------------------------------------------------------------
-
-makeWsApp :: AgentConfig -> AuthConfig -> TelemetryRecorder -> SessionManager -> TVar Bool -> WS.ServerApp
-makeWsApp config authCfg recorder sessionMgr shutdownVar pending = do
-  isShuttingDown <- readTVarIO shutdownVar
-  if isShuttingDown
-    then WS.rejectRequest pending "Server shutting down"
-    else do
-      let headers = WS.requestHeaders (WS.pendingRequest pending)
-          token = extractBearerFromHeaders headers
-      authResult <- authenticate authCfg (maybe "" id token)
-      case authResult of
-        Unauthenticated reason -> do
-          WS.rejectRequest pending (TE.encodeUtf8 reason)
-            `finally` void (try @SomeException (recorder.recordEvent Tel.EvAuthRejected{ Tel.rejectionReason = reason }))
-        Authenticated identity -> do
-          conn <- WS.acceptRequest pending
-          WS.withPingThread conn 30 (pure ()) $
-            handleConnection config recorder sessionMgr identity conn
-
-extractBearerFromHeaders :: WS.Headers -> Maybe Text
-extractBearerFromHeaders headers =
-  case lookup "Authorization" headers of
-    Just val ->
-      let t = TE.decodeUtf8 val
-       in if Text.isPrefixOf "Bearer " t
-            then Just (Text.drop 7 t)
-            else Nothing
-    Nothing -> Nothing
 
 -- --------------------------------------------------------------------
 -- Connection handler
