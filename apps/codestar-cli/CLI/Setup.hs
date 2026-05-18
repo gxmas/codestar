@@ -19,22 +19,18 @@ import CodeStar.AgentLoop
   , AgentEvent (..)
   )
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
-import CodeStar.Compaction qualified as Compaction
 import CLI.Telemetry (mkRecorder)
 import CodeStar.Config
   ( Config (..)
   , ApiKey (..)
   , BudgetSection (..)
-  , ContextSection (..)
-  , CompactionSection (..)
-  , GuardrailsSection (..)
   , RunArgs (..)
   , loadConfig
   )
+import CodeStar.Config.Convert (toContextConfig, toCompactionConfig, toGuardrailConfig)
 import CodeStar.Config.Paths qualified as Paths
 import CodeStar.Config.Types (ModelEntry (..))
 import CodeStar.Context (ContextParts (..), assemble)
-import CodeStar.Context qualified as CC
 import CodeStar.Guardrails qualified as GR
 import CodeStar.LLM.Anthropic (newAnthropicClient)
 import CodeStar.LLM.Base (LlmClientDict, LlmError (..), ToolName (..), withDefaults, withRetry)
@@ -267,32 +263,6 @@ signalText = \case
   NeedsInput q -> "needs-input: " <> q
   Blocked r -> "blocked: " <> r
 
--- --------------------------------------------------------------------
--- Config section conversions
--- --------------------------------------------------------------------
-
-toContextConfig :: ContextSection -> CC.ContextConfig
-toContextConfig c = CC.ContextConfig
-  { CC.maxContextTokens = c.maxTokens
-  , CC.repoMapReserve   = c.repoMapReserve
-  , CC.memoryReserve    = c.memoryReserve
-  , CC.compactionReserve = c.compactionReserve
-  , CC.responseReserve  = c.responseReserve
-  }
-
-toCompactionConfig :: CompactionSection -> Compaction.CompactionConfig
-toCompactionConfig c = Compaction.CompactionConfig
-  { Compaction.triggerFraction  = c.triggerFraction
-  , Compaction.maxContextTokens = c.maxContextTokens
-  }
-
-toGuardrailConfig :: GuardrailsSection -> GR.GuardrailConfig
-toGuardrailConfig g = GR.GuardrailConfig
-  { GR.denyList       = g.denyList
-  , GR.allowList      = g.allowList
-  , GR.allowedPaths   = Nothing
-  , GR.secretPatterns = g.secretPatterns
-  }
 
 -- --------------------------------------------------------------------
 -- Diagnostics

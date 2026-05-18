@@ -33,6 +33,7 @@ library
     CodeStar.Config.Env
     CodeStar.Config.Toml
     CodeStar.Config.Json
+    CodeStar.Config.Convert
     CodeStar.Config.Load
     CodeStar.Config.Migrate
     CodeStar.Config.Paths
