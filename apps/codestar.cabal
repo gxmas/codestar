@@ -141,7 +141,9 @@ executable codestar-cli
   import:         shared
   hs-source-dirs: codestar-cli
   main-is:        CLI.hs
-  other-modules:  CLI.Repl
+  other-modules:
+      CLI.Repl
+    , CLI.Setup
   build-depends:
       base
     , aeson
