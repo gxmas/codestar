@@ -2,7 +2,6 @@ module CodeStar.Config
   ( -- * Config (resolved)
     Config (..)
   , ApiKey (..)
-  , ModelSpec (..)
   , ModelEntry (..)
   , ServerSection (..)
   , TelemetrySection (..)

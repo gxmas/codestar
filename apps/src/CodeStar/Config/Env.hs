@@ -45,7 +45,6 @@ loadFromEnv = do
   let partial = PartialConfig
         (Last Nothing)
         (Last Nothing)
-        (Last Nothing)
         (Last activeModelEnv)
         (Last Nothing)
         (Last Nothing)

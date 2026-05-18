@@ -3,21 +3,18 @@
 module CodeStar.LLM.BaseSpec (spec) where
 
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import Test.Hspec
 
-import CodeStar.Config (ModelSpec (..))
+import CodeStar.Config (ModelEntry (..), ApiKey (..))
 import CodeStar.LLM.Base
-import CodeStar.Types (ModelRole (..))
 
 spec :: Spec
 spec = describe "CodeStar.LLM.Base" $ do
-  it "trivialResolver always returns the same client" $ do
-    client <- mkClient "p" "m"
-    let resolver = trivialResolver client
-    clientInfo (resolver Architect) `shouldBe` clientInfo client
-    clientInfo (resolver Coder) `shouldBe` clientInfo client
+  it "buildClientFromEntry uses entry api key and model" $ do
+    let entry = ModelEntry "test" "anthropic" "my-model" (ApiKey "key-123") Nothing Nothing Nothing
+    client <- buildClientFromEntry entry (\k m -> mkClient k m)
+    clientInfo client `shouldBe` ClientInfo "key-123" "my-model"
 
   it "withDefaults overrides completion request knobs" $ do
     seenRef <- newIORef Nothing
@@ -124,31 +121,6 @@ spec = describe "CodeStar.LLM.Base" $ do
         r.temperature `shouldBe` Just 0.7
         r.topP `shouldBe` Just 0.95
 
-  it "buildResolver maps roles to model-based clients" $ do
-    let roleMap =
-          Map.fromList
-            [ (Architect, ModelSpec "m-arch" Nothing Nothing Nothing)
-            , (Coder, ModelSpec "m-code" Nothing Nothing Nothing)
-            ]
-    resolver <- buildResolver roleMap (\m -> mkClient "factory" m)
-    modelId (clientInfo (resolver Architect)) `shouldBe` "m-arch"
-    modelId (clientInfo (resolver Coder)) `shouldBe` "m-code"
-
-  it "buildResolver reuses base clients for duplicate model names" $ do
-    seenModelsRef <- newIORef ([] :: [Text.Text])
-    let roleMap =
-          Map.fromList
-            [ (Architect, ModelSpec "m-shared" Nothing Nothing Nothing)
-            , (Coder, ModelSpec "m-shared" (Just 0.1) (Just 0.8) (Just 256))
-            , (Validator, ModelSpec "m-validate" Nothing Nothing Nothing)
-            ]
-    _ <-
-      buildResolver roleMap $ \m -> do
-        modifyIORef' seenModelsRef (m :)
-        mkClient "factory" m
-    seen <- readIORef seenModelsRef
-    let uniqSeen = Map.keysSet (Map.fromList [(m, ()) | m <- seen])
-    uniqSeen `shouldBe` Map.keysSet (Map.fromList [("m-shared", ()), ("m-validate", ())])
 
 minimalReq :: CompletionRequest
 minimalReq =

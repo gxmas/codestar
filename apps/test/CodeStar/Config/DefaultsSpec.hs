@@ -2,12 +2,11 @@
 
 module CodeStar.Config.DefaultsSpec (spec) where
 
-import Data.Map.Strict qualified as Map
 import Test.Hspec
 
-import CodeStar.Config.Defaults (defaultConfig, defaultModelRoles)
+import CodeStar.Config.Defaults (defaultConfig, defaultModels, defaultActiveModel)
 import CodeStar.Config.Types (Config (..), ContextSection (..), ServerSection (..), ShellSection (..))
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 spec :: Spec
 spec = describe "CodeStar.Config.Defaults" $ do
@@ -18,9 +17,9 @@ spec = describe "CodeStar.Config.Defaults" $ do
     wp `shouldBe` "."
     mcps `shouldBe` []
 
-  it "contains all required model role defaults" $ do
-    Map.keysSet defaultModelRoles `shouldBe` Map.keysSet (Map.fromList [(Architect, ()), (Coder, ()), (Validator, ()), (Summarizer, ())])
-    Map.size defaultModelRoles `shouldBe` 4
+  it "contains at least one default model entry" $ do
+    length defaultModels `shouldSatisfy` (>= 1)
+    defaultActiveModel `shouldBe` "sonnet"
 
   it "uses expected core numeric defaults" $ do
     let Config{server = ServerSection{port = p}, shell = ShellSection{defaultTimeout = dt}, context = ContextSection{maxTokens = mt}} = defaultConfig

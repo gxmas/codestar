@@ -24,7 +24,6 @@ spec = do
   describe "JSON roundtrip" $ do
     it "TaskType" $ property (roundtrip @TaskType)
     it "FailureClass" $ property (roundtrip @FailureClass)
-    it "ModelRole" $ property (roundtrip @ModelRole)
     it "PlanningMode" $ property (roundtrip @PlanningMode)
     it "CheckResult" $ property (roundtrip @CheckResult)
     it "Evidence" $ property (roundtrip @Evidence)

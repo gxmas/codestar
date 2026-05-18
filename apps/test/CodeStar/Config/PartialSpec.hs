@@ -24,10 +24,10 @@ partialWithProvider v =
 isSet :: Last a -> Bool
 isSet = isJust . getLast
 
--- Count how many of the 11 top-level Last fields are populated.
+-- Count how many of the 10 top-level Last fields are populated.
 countSetFieldsPC :: PartialConfig -> Int
 countSetFieldsPC p = length . filter id $
-  [ isSet p.provider, isSet p.modelRoles, isSet p.models, isSet p.activeModel
+  [ isSet p.provider, isSet p.models, isSet p.activeModel
   , isSet p.planningMode, isSet p.sandboxMode, isSet p.workspacePath
   , isSet p.apiKey, isSet p.indexStrategy, isSet p.permissions
   , isSet p.mcpEndpoints
@@ -35,10 +35,10 @@ countSetFieldsPC p = length . filter id $
 
 fieldBandPC :: PartialConfig -> String
 fieldBandPC p
-  | n == 0    = "empty (0/11 fields)"
-  | n <= 3    = "sparse (1-3/11 fields)"
-  | n <= 7    = "mixed (4-7/11 fields)"
-  | otherwise = "rich (8-11/11 fields)"
+  | n == 0    = "empty (0/10 fields)"
+  | n <= 3    = "sparse (1-3/10 fields)"
+  | n <= 7    = "mixed (4-7/10 fields)"
+  | otherwise = "rich (8-10/10 fields)"
   where n = countSetFieldsPC p
 
 countSetFieldsServer :: PartialServerSection -> Int
@@ -60,10 +60,10 @@ spec = describe "PartialConfig monoid laws" $ do
   -- cover 80: with 70/30 bias, P(count >= 4) ≈ 99%; would fail at 50/50 (83%).
   prop "left identity: mempty <> p == p" $
     \p ->
-      classify (fieldBandPC p == "empty (0/11 fields)") "empty" $
-      classify (fieldBandPC p == "sparse (1-3/11 fields)") "sparse (1-3)" $
-      classify (fieldBandPC p == "mixed (4-7/11 fields)") "mixed (4-7)" $
-      classify (fieldBandPC p == "rich (8-10/11 fields)") "rich (8-10)" $
+      classify (fieldBandPC p == "empty (0/10 fields)") "empty" $
+      classify (fieldBandPC p == "sparse (1-3/10 fields)") "sparse (1-3)" $
+      classify (fieldBandPC p == "mixed (4-7/10 fields)") "mixed (4-7)" $
+      classify (fieldBandPC p == "rich (8-10/10 fields)") "rich (8-10)" $
       cover 80 (countSetFieldsPC p >= 4) "at least 4 top-level fields set" $
       (mempty <> p) === (p :: PartialConfig)
 

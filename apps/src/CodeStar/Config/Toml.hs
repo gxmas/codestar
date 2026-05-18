@@ -2,8 +2,7 @@ module CodeStar.Config.Toml
   ( parseTomlConfig
   ) where
 
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
+
 import Control.Monad (join)
 import Data.Monoid (Last (..))
 import Data.Set qualified as Set
@@ -13,7 +12,7 @@ import Data.Word (Word64)
 import TOML (Decoder, Value, decodeWith, getFieldOpt, getFieldWith, getArrayOf, tomlDecoder)
 
 import CodeStar.Config.Types
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 parseTomlConfig :: Text -> Either Text PartialConfig
 parseTomlConfig input =
@@ -38,15 +37,13 @@ configDecoder = do
   bgt          <- optSection budgetDecoder "budget"
   rm           <- optSection repoMapDecoder "repomap"
   mem          <- optSection memoryDecoder "memory"
-  mdls         <- optSection modelsDecoder' "models"
-  -- [[model_entries]] uses a distinct key to avoid collision with [models.architect] sub-tables
+  -- [[model_entries]] uses a distinct key to avoid collision with legacy [models.architect] sub-tables
   mdlEntries   <- optFieldWith (getArrayOf modelEntryDecoder) "model_entries" :: Decoder (Maybe [ModelEntry])
   activeMdl    <- getFieldOpt "active_model"
   authSect     <- optSection authDecoder "auth"
 
   pure PartialConfig
     { provider      = Last provider
-    , modelRoles    = Last (join mdls)
     , models        = Last mdlEntries
     , activeModel   = Last activeMdl
     , planningMode  = Last (fmap toPlanningMode planningMode)
@@ -248,22 +245,6 @@ modelEntryDecoder = do
     , meMaxTokens   = mt
     }
 
-modelsDecoder' :: Decoder (Maybe (Map ModelRole ModelSpec))
-modelsDecoder' = do
-  arch <- optFieldWith modelSpecDecoder "architect"
-  cod  <- optFieldWith modelSpecDecoder "coder"
-  val  <- optFieldWith modelSpecDecoder "validator"
-  summ <- optFieldWith modelSpecDecoder "summarizer"
-  let pairs = concat
-        [ maybe [] (\s -> [(Architect, s)]) arch
-        , maybe [] (\s -> [(Coder, s)]) cod
-        , maybe [] (\s -> [(Validator, s)]) val
-        , maybe [] (\s -> [(Summarizer, s)]) summ
-        ]
-  pure $ if null pairs
-    then Nothing
-    else Just (Map.fromList pairs)
-
 -- --------------------------------------------------------------------
 -- Enum conversions
 -- --------------------------------------------------------------------
@@ -283,15 +264,6 @@ toPlanningMode :: Text -> PlanningMode
 toPlanningMode "list" = ListPlan
 toPlanningMode "dag"  = DagPlan
 toPlanningMode _      = NoPlan
-
-modelSpecDecoder :: Decoder ModelSpec
-modelSpecDecoder = ModelSpec
-  <$> getFieldOpt "name" `withDefault` ""
-  <*> getFieldOpt "temperature"
-  <*> getFieldOpt "top_p"
-  <*> getFieldOpt "max_tokens"
- where
-  withDefault dec def = fmap (maybe def id) dec
 
 optFieldWith :: Decoder a -> Text -> Decoder (Maybe a)
 optFieldWith dec key = do

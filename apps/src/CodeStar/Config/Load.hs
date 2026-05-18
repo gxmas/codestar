@@ -6,8 +6,6 @@ module CodeStar.Config.Load
 
 import Data.ByteString qualified as BS
 import Data.List.NonEmpty (NonEmpty)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Monoid (Last (..))
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
@@ -20,7 +18,6 @@ import CodeStar.Config.Json (parseJsonConfig)
 import CodeStar.Config.Toml (parseTomlConfig)
 import CodeStar.Config.Types
 import CodeStar.Config.Validate (resolve)
-import CodeStar.Types (ModelRole (..))
 
 loadConfig :: RunArgs -> IO (Either (NonEmpty ConfigError) Config)
 loadConfig args = do
@@ -73,7 +70,6 @@ cliToPartial :: RunArgs -> PartialConfig
 cliToPartial args =
   PartialConfig
     (Last Nothing)
-    (cliModelRoles args.cliModel)
     (Last Nothing)
     (Last args.cliModel)
     (Last Nothing)
@@ -103,7 +99,6 @@ workspacePartial workspace =
     (Last Nothing)
     (Last Nothing)
     (Last Nothing)
-    (Last Nothing)
     mempty
     (Last (Just workspace))
     (Last Nothing)
@@ -120,12 +115,6 @@ workspacePartial workspace =
     mempty
     mempty
     mempty
-
-cliModelRoles :: Maybe Text -> Last (Map ModelRole ModelSpec)
-cliModelRoles Nothing  = Last Nothing
-cliModelRoles (Just m) =
-  Last $ Just $ Map.fromList
-    [(Coder, ModelSpec m Nothing Nothing (Just 8192))]
 
 globalSettingsDir :: IO FilePath
 globalSettingsDir = Paths.globalConfigDir

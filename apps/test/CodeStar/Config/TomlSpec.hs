@@ -2,8 +2,7 @@
 
 module CodeStar.Config.TomlSpec (spec) where
 
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
+
 import Data.Monoid (Last (..))
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -17,7 +16,7 @@ import CodeStar.Config.Gen ()
 import CodeStar.Config.Toml (parseTomlConfig)
 import CodeStar.Config.Types
 import CodeStar.Config.Types qualified as CT
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 -- --------------------------------------------------------------------
 -- Normalisation
@@ -44,9 +43,9 @@ normalizeBudget (PartialBudgetSection ms stm dtm) =
 -- Fields absent from the TOML schema (hard-coded to mempty/Last Nothing by
 -- the decoder): sandboxMode, auth, workspacePath, apiKey, mcpEndpoints.
 normalizeForToml :: PartialConfig -> PartialConfig
-normalizeForToml (PartialConfig pr mr _ _ pm _ _ _ _ is pe _ sv tel cx cp sh se gr bu rm mn) =
+normalizeForToml (PartialConfig pr _ _ pm _ _ _ _ is pe _ sv tel cx cp sh se gr bu rm mn) =
   PartialConfig
-    pr mr (Last Nothing) (Last Nothing) pm
+    pr (Last Nothing) (Last Nothing) pm
     (Last Nothing) mempty (Last Nothing) (Last Nothing)
     is pe (Last Nothing)
     sv (normalizeTelemetry tel) cx cp sh se gr (normalizeBudget bu) rm mn
@@ -61,7 +60,6 @@ renderToml p = mconcat $ concat
   , [ kv "planning_mode"  renderPlanningMode v | v <- mf p.planningMode ]
   , [ kv "index_strategy" renderIndexStrategy v | v <- mf p.indexStrategy ]
   , [ listKv "permissions" vs                   | vs <- mf p.permissions ]
-  , renderModelRoles (getLast p.modelRoles)
   , renderServer     p.server
   , renderTelemetry  p.telemetry
   , renderContext    p.context
@@ -121,25 +119,6 @@ renderTelemetryMode :: TelemetryMode -> Text
 renderTelemetryMode TelemetryOtlp   = "\"otlp\""
 renderTelemetryMode TelemetryStderr = "\"stderr\""
 renderTelemetryMode TelemetryOff    = "\"off\""
-
-renderModelRoles :: Maybe (Map ModelRole ModelSpec) -> [Text]
-renderModelRoles Nothing  = []
-renderModelRoles (Just m) = concatMap go (Map.toList m)
-  where
-    go (role, ms) =
-      sectionLines ("models." <> roleKey role) (renderModelSpec ms)
-    roleKey Architect  = "architect"
-    roleKey Coder      = "coder"
-    roleKey Validator  = "validator"
-    roleKey Summarizer = "summarizer"
-
-renderModelSpec :: ModelSpec -> [Text]
-renderModelSpec ms = concat
-  [ [ kv "name"        renderStr    ms.modelName ]
-  , [ kv "temperature" renderDouble d | Just d <- [ms.temperature] ]
-  , [ kv "top_p"       renderDouble d | Just d <- [ms.topP] ]
-  , [ kv "max_tokens"  renderInt    n | Just n <- [ms.maxTokens] ]
-  ]
 
 renderServer :: PartialServerSection -> [Text]
 renderServer s = sectionLines "server" $ concat
@@ -258,16 +237,17 @@ spec = describe "CodeStar.Config.Toml" $ do
         getLast prt `shouldBe` Just 9090
         getLast mbh `shouldBe` Just "0.0.0.0"
 
-  it "parses model role sections into modelRoles map" $ do
+  it "parses [[model_entries]] array into models list" $ do
     let input =
-          "[models.architect]\n\
-          \name = \"model-a\"\n\
-          \max_tokens = 1234\n"
+          "[[model_entries]]\n\
+          \name = \"sonnet\"\n\
+          \provider = \"anthropic\"\n\
+          \model = \"claude-sonnet-4-6\"\n"
     case parseTomlConfig input of
       Left err -> expectationFailure ("Expected Right PartialConfig, got Left: " <> show err)
       Right pc -> do
-        let CT.PartialConfig{CT.modelRoles = roles} = pc
-        getLast roles `shouldSatisfy` maybe False (not . null)
+        let CT.PartialConfig{CT.models = ms} = pc
+        getLast ms `shouldSatisfy` maybe False (not . null)
 
   it "returns Left for invalid TOML syntax" $
     case parseTomlConfig "[server" of

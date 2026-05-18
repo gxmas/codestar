@@ -29,24 +29,17 @@ module CodeStar.LLM.Base
   , LlmClientDict (..)
 
     -- * Model Resolution
-  , ModelResolver
-  , trivialResolver
   , withFallback
   , withDefaults
   , withRetry
-  , buildResolver
   , buildClientFromEntry
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Exception (Exception)
-import Control.Monad (forM)
 import Data.Aeson (Value)
 import Data.Hashable (Hashable)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.List (nub)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Time (NominalDiffTime)
@@ -55,8 +48,7 @@ import GHC.Generics (Generic)
 
 import Resilience.Core (RecoveryEngine, withRecoveryEither)
 
-import CodeStar.Config (ModelSpec (..), ModelEntry (..), ApiKey (..))
-import CodeStar.Types (ModelRole)
+import CodeStar.Config (ModelEntry (..), ApiKey (..))
 
 -- --------------------------------------------------------------------
 -- Messages
@@ -181,15 +173,6 @@ data LlmClientDict = LlmClientDict
   , countTokens :: [Message] -> IO (Either LlmError TokenCount)
   }
 
--- --------------------------------------------------------------------
--- Model Resolution
--- --------------------------------------------------------------------
-
-type ModelResolver = ModelRole -> LlmClientDict
-
-trivialResolver :: LlmClientDict -> ModelResolver
-trivialResolver client = const client
-
 {- | Wrap a client to inject default parameters into every CompletionRequest.
 Spec values take precedence over whatever the caller sets in the request.
 -}
@@ -211,34 +194,6 @@ withDefaults temp topp maxtok client =
       , temperature = temp <|> req.temperature
       , topP = topp <|> req.topP
       }
-
-{- | Build a ModelResolver from a role→spec map and a client factory.
-Creates one base client per unique modelId to reuse connections, then
-wraps each with the role's parameter defaults baked in.
--}
-buildResolver ::
-  Map ModelRole ModelSpec ->
-  (Text -> IO LlmClientDict) ->
-  IO ModelResolver
-buildResolver roleMap factory = do
-  let pairs = Map.toList roleMap
-      modelNames = nub (map ((.modelName) . snd) pairs)
-  baseClients <- fmap Map.fromList $
-    forM modelNames $
-      \m -> (m,) <$> factory m
-  let fallback = snd (Map.findMin baseClients)
-      clientMap =
-        Map.fromList
-          [ ( role
-            , withDefaults
-                spec.temperature
-                spec.topP
-                spec.maxTokens
-                (baseClients Map.! spec.modelName)
-            )
-          | (role, spec) <- pairs
-          ]
-  pure $ \role -> Map.findWithDefault fallback role clientMap
 
 buildClientFromEntry :: ModelEntry -> (Text -> Text -> IO LlmClientDict) -> IO LlmClientDict
 buildClientFromEntry entry factory = do

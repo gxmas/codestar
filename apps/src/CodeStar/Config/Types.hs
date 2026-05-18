@@ -13,7 +13,6 @@ module CodeStar.Config.Types
 
     -- * Model specification
   , ModelEntry (..)
-  , ModelSpec (..)
 
     -- * Sections
   , ServerSection (..)
@@ -69,7 +68,7 @@ import Data.Text (Text)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 -- --------------------------------------------------------------------
 -- API Key
@@ -97,14 +96,6 @@ data ConfigError
 -- --------------------------------------------------------------------
 -- Model Specification
 -- --------------------------------------------------------------------
-
-data ModelSpec = ModelSpec
-  { modelName   :: !Text
-  , temperature :: !(Maybe Double)
-  , topP        :: !(Maybe Double)
-  , maxTokens   :: !(Maybe Int)
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
 
 data ModelEntry = ModelEntry
   { meName        :: !Text
@@ -448,7 +439,6 @@ instance Monoid PartialAuthSection where
 
 data Config = Config
   { provider      :: !Text
-  , modelRoles    :: !(Map ModelRole ModelSpec)
   , models        :: ![ModelEntry]
   , activeModel   :: !Text
   , planningMode  :: !PlanningMode
@@ -473,7 +463,6 @@ data Config = Config
 
 data PartialConfig = PartialConfig
   { provider      :: !(Last Text)
-  , modelRoles    :: !(Last (Map ModelRole ModelSpec))
   , models        :: !(Last [ModelEntry])
   , activeModel   :: !(Last Text)
   , planningMode  :: !(Last PlanningMode)
@@ -499,7 +488,6 @@ data PartialConfig = PartialConfig
 instance Semigroup PartialConfig where
   a <> b = PartialConfig
     { provider      = a.provider <> b.provider
-    , modelRoles    = a.modelRoles <> b.modelRoles
     , models        = a.models <> b.models
     , activeModel   = a.activeModel <> b.activeModel
     , planningMode  = a.planningMode <> b.planningMode
@@ -524,7 +512,7 @@ instance Semigroup PartialConfig where
 
 instance Monoid PartialConfig where
   mempty = PartialConfig
-    { provider = Last Nothing, modelRoles = Last Nothing, models = Last Nothing
+    { provider = Last Nothing, models = Last Nothing
     , activeModel = Last Nothing, planningMode = Last Nothing
     , sandboxMode = Last Nothing, auth = mempty, workspacePath = Last Nothing
     , apiKey = Last Nothing, indexStrategy = Last Nothing, permissions = Last Nothing

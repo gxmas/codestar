@@ -20,7 +20,6 @@ resolve partial =
 applyDefaults :: PartialConfig -> Config
 applyDefaults p = Config
   { provider      = fromLast defaultConfig.provider       p.provider
-  , modelRoles    = fromLast defaultConfig.modelRoles     p.modelRoles
   , models        = fromLast defaultConfig.models         p.models
   , activeModel   = fromLast defaultConfig.activeModel    p.activeModel
   , planningMode  = fromLast defaultConfig.planningMode   p.planningMode

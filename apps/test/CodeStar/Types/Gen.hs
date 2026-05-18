@@ -27,9 +27,6 @@ instance Arbitrary TaskType where
 instance Arbitrary FailureClass where
   arbitrary = arbitraryBoundedEnum
 
-instance Arbitrary ModelRole where
-  arbitrary = arbitraryBoundedEnum
-
 instance Arbitrary PlanningMode where
   arbitrary = arbitraryBoundedEnum
 

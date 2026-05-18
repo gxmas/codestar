@@ -22,7 +22,6 @@ newtype LegacyPartialConfig = LegacyPartialConfig PartialConfig
 instance FromJSON LegacyPartialConfig where
   parseJSON = withObject "PartialConfig" $ \o -> do
     provider     <- o .:? "provider"
-    modelRoles   <- o .:? "modelRoles"
     planningMode <- o .:? "planningMode"
     indexStrat   <- o .:? "indexStrategy"
     permissions  <- o .:? "permissions"
@@ -36,7 +35,6 @@ instance FromJSON LegacyPartialConfig where
 
     pure $ LegacyPartialConfig $ PartialConfig
       (Last provider)
-      (Last modelRoles)
       (Last Nothing)
       (Last Nothing)
       (Last planningMode)

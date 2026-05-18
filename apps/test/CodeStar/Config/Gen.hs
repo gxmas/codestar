@@ -75,19 +75,6 @@ instance Arbitrary McpTransport where
 -- Composite instances
 -- --------------------------------------------------------------------
 
-instance Arbitrary ModelSpec where
-  arbitrary =
-    ModelSpec
-      <$> arbitraryConfigText
-      <*> arbitrary
-      <*> arbitrary
-      <*> arbitrary
-  shrink (ModelSpec n temp tp mt) =
-    [ModelSpec n' temp tp mt | n'    <- shrinkConfigText n]   ++
-    [ModelSpec n temp' tp mt | temp' <- shrink temp]          ++
-    [ModelSpec n temp tp' mt | tp'   <- shrink tp]            ++
-    [ModelSpec n temp tp mt' | mt'   <- shrink mt]
-
 instance Arbitrary ModelEntry where
   arbitrary =
     ModelEntry
@@ -290,7 +277,6 @@ instance Arbitrary PartialConfig where
   arbitrary =
     PartialConfig
       <$> arbitraryLast arbitraryConfigText
-      <*> arbitraryLast (Map.fromList <$> mapM (\r -> (r,) <$> arbitrary) [minBound..maxBound])
       <*> arbitraryLast (listOf arbitrary)
       <*> arbitraryLast arbitraryConfigText
       <*> arbitraryLast arbitrary
@@ -311,31 +297,28 @@ instance Arbitrary PartialConfig where
       <*> arbitrary
       <*> arbitrary
       <*> arbitrary
-  shrink (PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn) =
-    [PartialConfig pr' mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | pr'   <- shrinkLast shrinkConfigText pr]                   ++
-    [PartialConfig pr mr' mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | mr'   <- shrinkLast shrinkModelRoleMap mr]                 ++
-    [PartialConfig pr mr mdls' am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | mdls' <- shrinkLast (shrinkList shrink) mdls]              ++
-    [PartialConfig pr mr mdls am' pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | am'   <- shrinkLast shrinkConfigText am]                   ++
-    [PartialConfig pr mr mdls am pm' sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | pm'   <- shrinkLast shrink pm]                             ++
-    [PartialConfig pr mr mdls am pm sm' au wp ak is pe me sv tl cx cp sh se gr bu rm mn | sm'   <- shrinkLast shrink sm]                             ++
-    [PartialConfig pr mr mdls am pm sm au' wp ak is pe me sv tl cx cp sh se gr bu rm mn | au'   <- shrink au]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp' ak is pe me sv tl cx cp sh se gr bu rm mn | wp'   <- shrinkLast shrinkFilePath wp]                     ++
-    [PartialConfig pr mr mdls am pm sm au wp ak' is pe me sv tl cx cp sh se gr bu rm mn | ak'   <- shrinkLast shrink ak]                             ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is' pe me sv tl cx cp sh se gr bu rm mn | is'   <- shrinkLast shrink is]                             ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe' me sv tl cx cp sh se gr bu rm mn | pe'   <- shrinkLast (shrinkList shrinkConfigText) pe]      ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me' sv tl cx cp sh se gr bu rm mn | me'   <- shrinkLast (shrinkList shrink) me]                ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv' tl cx cp sh se gr bu rm mn | sv'   <- shrink sv]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl' cx cp sh se gr bu rm mn | tl'   <- shrink tl]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx' cp sh se gr bu rm mn | cx'   <- shrink cx]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp' sh se gr bu rm mn | cp'   <- shrink cp]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh' se gr bu rm mn | sh'   <- shrink sh]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se' gr bu rm mn | se'   <- shrink se]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr' bu rm mn | gr'   <- shrink gr]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu' rm mn | bu'   <- shrink bu]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm' mn | rm'   <- shrink rm]                                        ++
-    [PartialConfig pr mr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn' | mn'   <- shrink mn]
+  shrink (PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn) =
+    [PartialConfig pr' mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | pr'   <- shrinkLast shrinkConfigText pr]                   ++
+    [PartialConfig pr mdls' am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | mdls' <- shrinkLast (shrinkList shrink) mdls]              ++
+    [PartialConfig pr mdls am' pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | am'   <- shrinkLast shrinkConfigText am]                   ++
+    [PartialConfig pr mdls am pm' sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn | pm'   <- shrinkLast shrink pm]                             ++
+    [PartialConfig pr mdls am pm sm' au wp ak is pe me sv tl cx cp sh se gr bu rm mn | sm'   <- shrinkLast shrink sm]                             ++
+    [PartialConfig pr mdls am pm sm au' wp ak is pe me sv tl cx cp sh se gr bu rm mn | au'   <- shrink au]                                        ++
+    [PartialConfig pr mdls am pm sm au wp' ak is pe me sv tl cx cp sh se gr bu rm mn | wp'   <- shrinkLast shrinkFilePath wp]                     ++
+    [PartialConfig pr mdls am pm sm au wp ak' is pe me sv tl cx cp sh se gr bu rm mn | ak'   <- shrinkLast shrink ak]                             ++
+    [PartialConfig pr mdls am pm sm au wp ak is' pe me sv tl cx cp sh se gr bu rm mn | is'   <- shrinkLast shrink is]                             ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe' me sv tl cx cp sh se gr bu rm mn | pe'   <- shrinkLast (shrinkList shrinkConfigText) pe]      ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me' sv tl cx cp sh se gr bu rm mn | me'   <- shrinkLast (shrinkList shrink) me]                ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv' tl cx cp sh se gr bu rm mn | sv'   <- shrink sv]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl' cx cp sh se gr bu rm mn | tl'   <- shrink tl]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx' cp sh se gr bu rm mn | cx'   <- shrink cx]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp' sh se gr bu rm mn | cp'   <- shrink cp]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh' se gr bu rm mn | sh'   <- shrink sh]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se' gr bu rm mn | se'   <- shrink se]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr' bu rm mn | gr'   <- shrink gr]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu' rm mn | bu'   <- shrink bu]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm' mn | rm'   <- shrink rm]                                        ++
+    [PartialConfig pr mdls am pm sm au wp ak is pe me sv tl cx cp sh se gr bu rm mn' | mn'   <- shrink mn]
     where
-      shrinkModelRoleMap m =
-        [Map.insert r ms' m | (r, ms) <- Map.toList m, ms' <- shrink ms]
       shrinkFilePath fp =
         filter (not . null) $ shrink fp

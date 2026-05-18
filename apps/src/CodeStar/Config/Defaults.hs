@@ -2,21 +2,17 @@ module CodeStar.Config.Defaults
   ( defaultConfig
   , defaultModels
   , defaultActiveModel
-  , defaultModelRoles
   ) where
 
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
 
 import CodeStar.Config.Types
-import CodeStar.Types (ModelRole (..), PlanningMode (..))
+import CodeStar.Types (PlanningMode (..))
 
 defaultConfig :: Config
 defaultConfig = Config
   { provider      = "anthropic"
-  , modelRoles    = defaultModelRoles
   , models        = defaultModels
   , activeModel   = defaultActiveModel
   , planningMode  = NoPlan
@@ -46,14 +42,6 @@ defaultModels =
 
 defaultActiveModel :: Text
 defaultActiveModel = "sonnet"
-
-defaultModelRoles :: Map ModelRole ModelSpec
-defaultModelRoles = Map.fromList
-  [ (Architect,  ModelSpec "claude-sonnet-4-20250514"  (Just 0.7) Nothing (Just 8192))
-  , (Coder,      ModelSpec "claude-sonnet-4-20250514"  (Just 0.0) Nothing (Just 8192))
-  , (Validator,  ModelSpec "claude-sonnet-4-20250514"  (Just 0.0) Nothing (Just 4096))
-  , (Summarizer, ModelSpec "claude-haiku-3-5-20241022" (Just 0.0) Nothing (Just 4096))
-  ]
 
 defaultServer :: ServerSection
 defaultServer = ServerSection

@@ -26,8 +26,6 @@ module CodeStar.Types
     -- * Objective
   , ObjectiveSpec (..)
 
-    -- * Model Roles
-  , ModelRole (..)
 
     -- * Planning
   , PlanningMode (..)
@@ -45,13 +43,11 @@ module CodeStar.Types
   ) where
 
 import Data.Aeson
-import Data.Aeson.Types (Parser, toJSONKeyText)
+import Data.Aeson.Types (Parser)
 import Data.Hashable (Hashable)
-import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Data.Word (Word64)
 import GHC.Generics (Generic)
 
 -- --------------------------------------------------------------------
@@ -245,39 +241,6 @@ data ObjectiveSpec = ObjectiveSpec
 -- Model Roles
 -- --------------------------------------------------------------------
 
-data ModelRole = Architect | Coder | Validator | Summarizer
-  deriving stock (Eq, Ord, Show, Enum, Bounded, Generic)
-
-instance ToJSON ModelRole where
-  toJSON = \case
-    Architect -> String "architect"
-    Coder -> String "coder"
-    Validator -> String "validator"
-    Summarizer -> String "summarizer"
-
-instance FromJSON ModelRole where
-  parseJSON = withText "ModelRole" $ \case
-    "architect" -> pure Architect
-    "coder" -> pure Coder
-    "validator" -> pure Validator
-    "summarizer" -> pure Summarizer
-    other -> fail $ "Unknown ModelRole: " <> show other
-
-instance ToJSONKey ModelRole where
-  toJSONKey = toJSONKeyText $ \case
-    Architect -> "architect"
-    Coder -> "coder"
-    Validator -> "validator"
-    Summarizer -> "summarizer"
-
-instance FromJSONKey ModelRole where
-  fromJSONKey = FromJSONKeyTextParser $ \case
-    "architect" -> pure Architect
-    "coder" -> pure Coder
-    "validator" -> pure Validator
-    "summarizer" -> pure Summarizer
-    other -> fail $ "Unknown ModelRole key: " <> show other
-
 -- --------------------------------------------------------------------
 -- Planning
 -- --------------------------------------------------------------------
@@ -303,8 +266,7 @@ instance FromJSON PlanningMode where
 -- --------------------------------------------------------------------
 
 data CostState = CostState
-  { tokensUsed :: Map ModelRole Word64
-  , estimatedCost :: Double
+  { estimatedCost :: Double
   , budget :: Maybe Double
   }
   deriving stock (Eq, Show, Generic)
