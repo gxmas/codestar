@@ -1,16 +1,15 @@
 module Server.SessionSetup (spawnAgentSession) where
 
-import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
-import Control.Exception (SomeException, bracket_, finally, mask, try)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
 
-import CodeStar.AgentLoop (AgentEnv (..), AgentEvent (..), runAgent)
+import CodeStar.AgentLoop (AgentEnv (..), AgentEvent (..))
 import CodeStar.AgentSetup (buildClientForEntry, buildRegistry, buildSystemPrompt, llmErrorLabel)
+import Server.AgentRunner (runAgentWithTelemetry)
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CodeStar.Config (Config (..), AgentConfig, BudgetSection (..))
 import CodeStar.Config.Convert (toContextConfig, toCompactionConfig, toGuardrailConfig)
@@ -29,7 +28,7 @@ import CodeStar.RepoMap.Graph (buildSymbolGraph, defaultWeights, extractTags, pa
 import CodeStar.RepoMap.Render (defaultRenderConfig, renderRepoMap)
 import CodeStar.RepoMap.Render qualified as RepoMap
 import CodeStar.Storage (newBackend)
-import CodeStar.Telemetry (TelemetryRecorder (..), signalLabel)
+import CodeStar.Telemetry (TelemetryRecorder (..))
 import CodeStar.Telemetry qualified as Tel
 import CodeStar.Tools.MCP (connectMcpEndpoints)
 import CodeStar.Tools.Read (newReadTracker)
@@ -37,9 +36,7 @@ import CodeStar.Tools.Registry (register)
 import CodeStar.Tools.TodoList (newTodoStore)
 import CodeStar.Transport.Types (AgentEventEnvelope (..), CommandResult (..))
 import CodeStar.TreeSitter (GrammarRegistry, loadGrammarRegistry)
-import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
-import OTel.Attribute (AttributeValue (..))
-import OTel.Context (getCurrent, attach, detach)
+import CodeStar.Types (SessionId (..))
 import Resilience.Core (defaultRecoveryPolicy, newRecoveryEngine)
 
 import Control.Monad (forM)
@@ -143,58 +140,7 @@ spawnAgentSession config recorder session identity eventSinkFn task = do
           , envPendingModel = session.pendingModel
           }
 
-  parentCtx <- getCurrent
-  thread <- async $ do
-    ctxToken <- attach parentCtx
-    let SessionId sid = session.sessionId
-        UserId uid = identity.userId
-    terminationReasonRef <- newIORef "cancelled"
-    let terminateWith reason = writeIORef terminationReasonRef reason
-    (`finally` detach ctxToken) $
-      bracket_
-        (recorder.adjustSessionCount 1)
-        (do reason <- readIORef terminationReasonRef
-            recorder.adjustSessionCount (-1)
-            recorder.recordEvent Tel.EvSessionTerminated
-              { Tel.sessionId = sid
-              , Tel.userId    = uid
-              , Tel.terminationReason = reason
-              })
-        (do recorder.recordEvent Tel.EvSessionCreated
-              { Tel.sessionId = sid
-              , Tel.userId    = uid
-              }
-            mask $ \restore -> do
-              spanResult <- restore $ try (recorder.startSpan "agent.turn"
-                [ ("session.id", StringValue sid)
-                , ("user.id",    StringValue uid)
-                , ("task",       StringValue (Text.take 200 task))
-                ])
-              case spanResult of
-                Left (spanEx :: SomeException) -> do
-                  terminateWith "error"
-                  eventSinkFn (AgentEventEnvelope session.sessionId
-                    (AgentError ("Telemetry init failed: " <> Text.pack (show spanEx))))
-                  atomically $ writeTVar session.status STerminated
-                Right rootSpan ->
-                  restore (do
-                    result <- try (runAgent env sysPrompt task)
-                    case result of
-                      Right signal -> do
-                        terminateWith (signalLabel signal)
-                        recorder.setSpanAttr rootSpan "outcome" (signalLabel signal)
-                        case signal of
-                          Blocked _ -> recorder.setSpanAttr rootSpan "sampling.priority" "1"
-                          _         -> pure ()
-                        atomically $ writeTVar session.status (SCompleted signal)
-                      Left (ex :: SomeException) -> do
-                        terminateWith "error"
-                        let msg = Text.pack (show ex)
-                        recorder.setSpanError rootSpan msg
-                        recorder.setSpanAttr rootSpan "sampling.priority" "1"
-                        eventSinkFn (AgentEventEnvelope session.sessionId (AgentError msg))
-                        atomically $ writeTVar session.status STerminated)
-                  `finally` recorder.endSpan rootSpan)
+  thread <- runAgentWithTelemetry recorder session identity.userId eventSinkFn env sysPrompt task
   atomically $ writeTVar session.workerThread (Just thread)
 
   pure CmdOk
