@@ -11,16 +11,23 @@
 #   5. CLI flags
 #
 # Required fields (no default, must be set):
-#   api_key — set via ANTHROPIC_API_KEY or CODESTAR_API_KEY env var.
-#             Not shown in this file because it must never be committed.
+#   api_key — set per model entry, or globally via ANTHROPIC_API_KEY /
+#             CODESTAR_API_KEY. Never commit API keys to version control.
 
 
 # ---------------------------------------------------------------------------
 # Top-level fields
 # ---------------------------------------------------------------------------
 
-# LLM provider. Currently only "anthropic" is supported.
+# LLM provider. Currently "anthropic" and "openai" (or any OpenAI-compatible
+# endpoint) are supported. This field is used as a fallback; each
+# [[model_entries]] block can specify its own provider independently.
 # provider = "anthropic"
+
+# The name of the active model entry. Must match the `name` field of one of
+# the [[model_entries]] blocks below. Overridden by CODESTAR_ACTIVE_MODEL and
+# the --model CLI flag.
+# active_model = "sonnet"
 
 # Task decomposition strategy.
 #   "none"  — single agent loop, no planning (default)
@@ -41,41 +48,52 @@
 
 
 # ---------------------------------------------------------------------------
-# [models] — LLM model assignments per role
+# [[model_entries]] — Named LLM model definitions
 #
-# Each role maps to a model name, optional sampling parameters, and an
-# optional max_tokens cap. Omitting a field leaves it at the provider default.
+# Define one or more named model entries. The session uses whichever entry
+# matches `active_model` at startup; the user can switch mid-session with
+# the `/model <name>` command (applied safely at the next turn boundary).
 #
-# Roles:
-#   architect  — file selection and plan generation (creative, higher temperature)
-#   coder      — step execution, tool calls (deterministic, temperature 0)
-#   validator  — plan validation and quality checks
-#   summarizer — history compaction (cheap, fast model preferred)
-# ---------------------------------------------------------------------------
-
-[models.architect]
-# name        = "claude-sonnet-4-20250514"
-# temperature = 0.7
-# max_tokens  = 8192
-# top_p       =         # omit to use provider default
-
-[models.coder]
-# name        = "claude-sonnet-4-20250514"
+# Each entry supports:
+#   name        — identifier referenced by active_model and /model (required)
+#   provider    — "anthropic" | "openai" | any OpenAI-compatible base URL (required)
+#   model       — provider model ID, e.g. "claude-sonnet-4-6" (required)
+#   api_key     — API key for this entry; falls back to ANTHROPIC_API_KEY /
+#                 CODESTAR_API_KEY if omitted
+#   temperature — sampling temperature (optional, uses provider default if omitted)
+#   top_p       — nucleus sampling parameter (optional)
+#   max_tokens  — maximum tokens in the LLM response (optional)
+#
+# Example — single Anthropic model (the built-in default):
+#
+# [[model_entries]]
+# name        = "sonnet"
+# provider    = "anthropic"
+# model       = "claude-sonnet-4-20250514"
 # temperature = 0.0
 # max_tokens  = 8192
-# top_p       =
-
-[models.validator]
-# name        = "claude-sonnet-4-20250514"
-# temperature = 0.0
-# max_tokens  = 4096
-# top_p       =
-
-[models.summarizer]
-# name        = "claude-haiku-3-5-20241022"
-# temperature = 0.0
-# max_tokens  = 4096
-# top_p       =
+#
+# Example — multiple providers, switch with /model:
+#
+# [[model_entries]]
+# name     = "sonnet"
+# provider = "anthropic"
+# model    = "claude-sonnet-4-20250514"
+# api_key  = "sk-ant-..."
+#
+# [[model_entries]]
+# name     = "opus"
+# provider = "anthropic"
+# model    = "claude-opus-4-7"
+# api_key  = "sk-ant-..."
+#
+# [[model_entries]]
+# name     = "gpt4o"
+# provider = "openai"
+# model    = "gpt-4o"
+# api_key  = "sk-..."
+#
+# active_model = "sonnet"   # which entry to start with
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +233,7 @@
 # [compaction] — History compaction settings
 #
 # Compaction runs when the conversation history grows beyond
-# trigger_fraction × max_context_tokens. The Summarizer model condenses
+# trigger_fraction × max_context_tokens. The active model condenses
 # the history to reclaim context space. Compaction is lossy: the task
 # description is always preserved, but fine-grained tool output from
 # earlier steps may be lost.
@@ -421,8 +439,14 @@
 #
 # Variable                              Overrides
 # ------------------------------------  ------------------------------------
-# ANTHROPIC_API_KEY                     api_key (used if CODESTAR_API_KEY unset)
-# CODESTAR_API_KEY                      api_key (takes priority over ANTHROPIC_API_KEY)
+# ANTHROPIC_API_KEY                     api_key fallback (if CODESTAR_API_KEY unset)
+# CODESTAR_API_KEY                      api_key fallback (takes priority over ANTHROPIC_API_KEY)
+# CODESTAR_ACTIVE_MODEL                 active_model
+# CODESTAR_AUTH_MODE                    auth.mode
+# CODESTAR_AUTH_JWKS_URI                auth.jwks_uri
+# CODESTAR_AUTH_SECRET                  auth.secret
+# CODESTAR_AUTH_ISSUER                  auth.issuer
+# CODESTAR_AUTH_AUDIENCE                auth.audience
 # CODESTAR_SERVER_PORT                  server.port
 # CODESTAR_TELEMETRY_MODE               telemetry.mode
 # CODESTAR_TELEMETRY_ENDPOINT           telemetry.endpoint
