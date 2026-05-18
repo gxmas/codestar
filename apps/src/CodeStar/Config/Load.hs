@@ -75,6 +75,8 @@ cliToPartial args =
     (Last Nothing)
     (cliModelRoles args.cliModel)
     (Last Nothing)
+    (Last args.cliModel)
+    (Last Nothing)
     (Last Nothing)
     mempty
     (Last Nothing)
@@ -96,6 +98,8 @@ cliToPartial args =
 workspacePartial :: FilePath -> PartialConfig
 workspacePartial workspace =
   PartialConfig
+    (Last Nothing)
+    (Last Nothing)
     (Last Nothing)
     (Last Nothing)
     (Last Nothing)

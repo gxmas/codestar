@@ -44,9 +44,9 @@ normalizeBudget (PartialBudgetSection ms stm dtm) =
 -- Fields absent from the TOML schema (hard-coded to mempty/Last Nothing by
 -- the decoder): sandboxMode, auth, workspacePath, apiKey, mcpEndpoints.
 normalizeForToml :: PartialConfig -> PartialConfig
-normalizeForToml (PartialConfig pr mr pm _ _ _ _ is pe _ sv tel cx cp sh se gr bu rm mn) =
+normalizeForToml (PartialConfig pr mr _ _ pm _ _ _ _ is pe _ sv tel cx cp sh se gr bu rm mn) =
   PartialConfig
-    pr mr pm
+    pr mr (Last Nothing) (Last Nothing) pm
     (Last Nothing) mempty (Last Nothing) (Last Nothing)
     is pe (Last Nothing)
     sv (normalizeTelemetry tel) cx cp sh se gr (normalizeBudget bu) rm mn

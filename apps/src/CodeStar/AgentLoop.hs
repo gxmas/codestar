@@ -56,7 +56,9 @@ module CodeStar.AgentLoop
   , runAgentWithPlan
   ) where
 
+import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
 import Control.Exception (IOException, try)
+import Data.IORef (IORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTimeNSec)
 import Data.Aeson (Value (..), object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -128,10 +130,9 @@ data ApprovalDecision
 -- Fields are intentionally strict to ensure the environment is fully
 -- evaluated before any agent work begins.
 data AgentEnv = AgentEnv
-  { envLlm :: ModelResolver
-    -- ^ Resolves a 'ModelRole' to the concrete LLM client to use.
-    --   Coder, Architect, and Summarizer roles may be backed by different
-    --   models or providers.
+  { envLlm :: IORef LlmClientDict
+    -- ^ The active LLM client for this session. Switchable between turns
+    --   via 'envPendingModel'.
   , envTools :: ToolRegistry
     -- ^ All tools available to the agent in this session, including both
     --   built-in tools and any tools discovered from MCP endpoints.
@@ -183,6 +184,9 @@ data AgentEnv = AgentEnv
     --   is invoked with the reason text. @Nothing@ causes the call to
     --   be passed to the LLM as a deferred approval request rather than
     --   blocking.
+  , envPendingModel :: !(TVar (Maybe (Text, LlmClientDict)))
+    -- ^ Pending model switch queued by CmdSetModel. Applied at the start
+    --   of the next turn.
   }
 
 -- | Events streamed to the client via 'AgentEnv.envOnEvent' as the agent
@@ -214,6 +218,8 @@ data AgentEvent
     --   describes the outcome: 'Done', 'Blocked', or 'NeedsInput'.
   | AgentError Text
     -- ^ An unrecoverable error occurred. The session will be terminated.
+  | AgentModelChanged Text Text
+    -- ^ Model switch applied at turn boundary. @(fromModel, toModel)@.
   deriving stock (Show)
 
 -- | All mutable state that persists across steps and turns within a single
@@ -290,7 +296,8 @@ data StepAction
 -- This is the primary entry point for multi-turn sessions. For single-turn
 -- use, see 'runAgent'.
 runAgentTurn :: AgentEnv -> Text -> SessionState -> Text -> IO (ControlSignal, SessionState)
-runAgentTurn env sysPrompt session task =
+runAgentTurn env sysPrompt session task = do
+  applyPendingModelSwap env
   let compState' =
         if Text.null session.ssCompState.csTask
           then session.ssCompState{csTask = task}
@@ -302,7 +309,28 @@ runAgentTurn env sysPrompt session task =
           , ssTurnCount = session.ssTurnCount + 1
           }
       turn = TurnState{tsStep = 0, tsRecentOutcomes = []}
-   in loop env sysPrompt session' turn
+  loop env sysPrompt session' turn
+
+applyPendingModelSwap :: AgentEnv -> IO ()
+applyPendingModelSwap env = do
+  pending <- atomically $ do
+    m <- readTVar env.envPendingModel
+    writeTVar env.envPendingModel Nothing
+    pure m
+  case pending of
+    Nothing -> pure ()
+    Just (newName, newClient) -> do
+      oldClient <- readIORef env.envLlm
+      writeIORef env.envLlm newClient
+      env.envOnEvent (AgentModelChanged oldClient.clientInfo.modelId newName)
+      let SessionId sid = env.envSessionId
+          UserId uid    = env.envUserId
+      env.envTelemetry.recordEvent Tel.EvModelSwitched
+        { Tel.msPreviousModel = oldClient.clientInfo.modelId
+        , Tel.msNewModel      = newName
+        , Tel.msSessionId     = sid
+        , Tel.msUserId        = uid
+        }
 
 -- | Run the agent on a single task from a fresh session, discarding the
 -- resulting 'SessionState'. Equivalent to:
@@ -326,13 +354,12 @@ runAgent env sysPrompt task =
 -- See 'CodeStar.PlanExecution.runWithPlan' for the planning implementation.
 runAgentWithList :: AgentEnv -> Text -> ObjectiveSpec -> Set PlanFingerprint -> IO ControlSignal
 runAgentWithList env sysPrompt spec triedFps = do
-  let arch = env.envLlm Architect
-      planner = env.envLlm Architect
-      cfg = defaultPlanExecutionConfig{repoContext = env.envCompState.csRepoMap}
+  client <- readIORef env.envLlm
+  let cfg = defaultPlanExecutionConfig{repoContext = env.envCompState.csRepoMap}
       executeStep step = do
         prompt <- buildStepPrompt sysPrompt step
         runAgent env prompt step.description
-  runWithPlan env.envTelemetry arch planner (env.envLlm Coder) cfg spec triedFps executeStep
+  runWithPlan env.envTelemetry client client client cfg spec triedFps executeStep
 
 -- | Run the agent on a complex objective using a DAG-scheduled plan.
 -- Steps with no unresolved dependencies are eligible for execution;
@@ -344,13 +371,12 @@ runAgentWithList env sysPrompt spec triedFps = do
 -- See 'CodeStar.PlanExecution.runWithPlanDag' for the planning implementation.
 runAgentWithPlan :: AgentEnv -> Text -> ObjectiveSpec -> Set PlanFingerprint -> IO ControlSignal
 runAgentWithPlan env sysPrompt spec triedFps = do
-  let arch = env.envLlm Architect
-      planner = env.envLlm Architect
-      cfg = defaultPlanExecutionConfig{repoContext = env.envCompState.csRepoMap}
+  client <- readIORef env.envLlm
+  let cfg = defaultPlanExecutionConfig{repoContext = env.envCompState.csRepoMap}
       executeStep step = do
         prompt <- buildStepPrompt sysPrompt step
         runAgent env prompt step.description
-  runWithPlanDag env.envTelemetry arch planner (env.envLlm Coder) cfg spec triedFps executeStep
+  runWithPlanDag env.envTelemetry client client client cfg spec triedFps executeStep
 
 -- | The inner step loop. Drives repeated calls to 'stepAgent' until
 -- 'stepAgent' returns a 'Stop' action. Handles 'NeedsInput' by calling
@@ -430,7 +456,8 @@ maybeCompact env session
         , ("history.len_before", OTelAttr.Int64Value (fromIntegral lenBefore))
         ]
       t0 <- getMonotonicTimeNSec
-      result <- compact (env.envLlm Summarizer) session.ssCompState session.ssHistory Nothing
+      compClient <- readIORef env.envLlm
+      result <- compact compClient session.ssCompState session.ssHistory Nothing
       t1 <- getMonotonicTimeNSec
       let durMs = fromIntegral ((t1 - t0) `div` 1_000_000) :: Double
       case result of
@@ -469,8 +496,8 @@ maybeCompact env session
 -- original data that must be stored.
 callLlm :: AgentEnv -> Text -> Int -> Int -> Seq Message -> Seq Message -> IO (Either ControlSignal (CompletionResponse, Seq Message))
 callLlm env sysPrompt stepNum turnNum rawHistory processedHistory = do
-  let client = env.envLlm Coder
-      SessionId sid = env.envSessionId
+  client <- readIORef env.envLlm
+  let SessionId sid = env.envSessionId
       UserId uid = env.envUserId
       req = CompletionRequest
         { messages = toList processedHistory
@@ -508,7 +535,7 @@ callLlm env sysPrompt stepNum turnNum rawHistory processedHistory = do
       env.envTelemetry.endSpan llmSpan
       env.envTelemetry.recordEvent $
         Tel.EvLlmCall
-          { Tel.modelRole           = Coder
+          { Tel.modelProvider       = client.clientInfo.providerName
           , Tel.inputTokens         = fromIntegral response.usage.inputTokens
           , Tel.outputTokens        = fromIntegral response.usage.outputTokens
           , Tel.cacheCreationTokens = fromIntegral response.usage.cacheCreationTokens

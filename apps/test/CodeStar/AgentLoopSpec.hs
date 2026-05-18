@@ -4,6 +4,7 @@ import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Foldable qualified as Foldable
+import Control.Concurrent.STM (newTVarIO)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.JsonSchema (objectSchema)
 import Data.Map.Strict qualified as Map
@@ -23,7 +24,7 @@ import CodeStar.LLM.Base
 import CodeStar.Telemetry (noOpRecorder)
 import CodeStar.Tools.Registry
 import CodeStar.TreeSitter (GrammarRegistry (..))
-import CodeStar.Types (ControlSignal (..), ModelRole (..), SessionId (..), UserId (..))
+import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
 
 spec :: Spec
 spec = describe "CodeStar.AgentLoop" $ do
@@ -322,13 +323,11 @@ mkTestEnv registry coderResponses summarizerResponses compCfg = do
   coderRef <- newIORef coderResponses
   sumRef <- newIORef summarizerResponses
   let coderClient = scriptedClient coderRef
-      summClient = scriptedClient sumRef
-      resolver role = case role of
-        Summarizer -> summClient
-        _ -> coderClient
+  clientRef <- newIORef coderClient
+  pendingVar <- newTVarIO Nothing
   pure
     AgentEnv
-      { envLlm = resolver
+      { envLlm = clientRef
       , envTools = registry
       , envConfig = defaultConfig
       , envTelemetry = noOpRecorder
@@ -344,6 +343,7 @@ mkTestEnv registry coderResponses summarizerResponses compCfg = do
       , envMemoryStore = Nothing
       , envWaitForInput = Nothing
       , envWaitForApproval = Nothing
+      , envPendingModel = pendingVar
       }
 
 scriptedClient :: IORef [CompletionResponse] -> LlmClientDict

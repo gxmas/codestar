@@ -22,6 +22,7 @@ loadFromEnv = do
   shellTo <- readEnvInt "CODESTAR_SHELL_DEFAULT_TIMEOUT"
   budgetSt <- readEnvInt "CODESTAR_BUDGET_MAX_STEPS"
 
+  activeModelEnv <- readEnvText "CODESTAR_ACTIVE_MODEL"
   authMode   <- readEnvText "CODESTAR_AUTH_MODE"
   authJwksUri <- readEnvText "CODESTAR_AUTH_JWKS_URI"
   authSecret <- readEnvText "CODESTAR_AUTH_SECRET"
@@ -44,6 +45,8 @@ loadFromEnv = do
   let partial = PartialConfig
         (Last Nothing)
         (Last Nothing)
+        (Last Nothing)
+        (Last activeModelEnv)
         (Last Nothing)
         (Last Nothing)
         authSection

@@ -21,6 +21,8 @@ applyDefaults :: PartialConfig -> Config
 applyDefaults p = Config
   { provider      = fromLast defaultConfig.provider       p.provider
   , modelRoles    = fromLast defaultConfig.modelRoles     p.modelRoles
+  , models        = fromLast defaultConfig.models         p.models
+  , activeModel   = fromLast defaultConfig.activeModel    p.activeModel
   , planningMode  = fromLast defaultConfig.planningMode   p.planningMode
   , sandboxMode   = fromLast defaultConfig.sandboxMode    p.sandboxMode
   , authMode      = resolveAuth p.auth
@@ -150,6 +152,7 @@ validate cfg = concat
   , checkPortConflict cfg
   , checkApiKey cfg
   , validateAuth cfg
+  , validateModels cfg
   ]
 
 validatePort :: Text -> Int -> [ConfigError]
@@ -210,6 +213,18 @@ validateAuth cfg = case cfg.authMode of
     , if jcfg.cacheTtlSeconds <= 0
         then [InvalidRange "auth.cache_ttl_seconds" "must be positive"]
         else []
+    ]
+
+validateModels :: Config -> [ConfigError]
+validateModels cfg
+  | null cfg.models = []
+  | not (any (\m -> m.meName == cfg.activeModel) cfg.models) =
+      [MissingRequired ("active_model \"" <> cfg.activeModel <> "\" not found in models list")]
+  | otherwise = concatMap validateEntry cfg.models
+ where
+  validateEntry m = concat
+    [ if m.meProvider == "" then [MissingRequired ("models." <> m.meName <> ".provider")] else []
+    , if m.meModel == "" then [MissingRequired ("models." <> m.meName <> ".model")] else []
     ]
 
 -- --------------------------------------------------------------------

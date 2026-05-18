@@ -10,7 +10,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word64)
-import TOML (Decoder, Value, decodeWith, getFieldOpt, getFieldWith)
+import TOML (Decoder, Value, decodeWith, getFieldOpt, getFieldWith, getArrayOf, tomlDecoder)
 
 import CodeStar.Config.Types
 import CodeStar.Types (ModelRole (..), PlanningMode (..))
@@ -39,11 +39,16 @@ configDecoder = do
   rm           <- optSection repoMapDecoder "repomap"
   mem          <- optSection memoryDecoder "memory"
   mdls         <- optSection modelsDecoder' "models"
+  -- [[model_entries]] uses a distinct key to avoid collision with [models.architect] sub-tables
+  mdlEntries   <- optFieldWith (getArrayOf modelEntryDecoder) "model_entries" :: Decoder (Maybe [ModelEntry])
+  activeMdl    <- getFieldOpt "active_model"
   authSect     <- optSection authDecoder "auth"
 
   pure PartialConfig
     { provider      = Last provider
     , modelRoles    = Last (join mdls)
+    , models        = Last mdlEntries
+    , activeModel   = Last activeMdl
     , planningMode  = Last (fmap toPlanningMode planningMode)
     , sandboxMode   = Last Nothing
     , auth          = maybe mempty id authSect
@@ -222,6 +227,25 @@ authDecoder = do
     , claimOrgId      = Last co
     , claimRoles      = Last cr
     , cacheTtlSeconds = Last ttl
+    }
+
+modelEntryDecoder :: Decoder ModelEntry
+modelEntryDecoder = do
+  n   <- getFieldWith tomlDecoder "name"
+  prv <- getFieldWith tomlDecoder "provider"
+  mdl <- getFieldWith tomlDecoder "model"
+  k   <- fmap (maybe (ApiKey "") ApiKey) (getFieldOpt "api_key")
+  tmp <- getFieldOpt "temperature"
+  tp  <- getFieldOpt "top_p"
+  mt  <- getFieldOpt "max_tokens"
+  pure ModelEntry
+    { meName        = n
+    , meProvider    = prv
+    , meModel       = mdl
+    , meApiKey      = k
+    , meTemperature = tmp
+    , meTopP        = tp
+    , meMaxTokens   = mt
     }
 
 modelsDecoder' :: Decoder (Maybe (Map ModelRole ModelSpec))

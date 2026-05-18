@@ -37,6 +37,8 @@ instance FromJSON LegacyPartialConfig where
     pure $ LegacyPartialConfig $ PartialConfig
       (Last provider)
       (Last modelRoles)
+      (Last Nothing)
+      (Last Nothing)
       (Last planningMode)
       (Last Nothing)
       mempty

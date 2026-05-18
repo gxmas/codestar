@@ -25,6 +25,7 @@ import Network.Wai.Handler.Warp qualified as Warp
 import Network.Wai.Handler.WebSockets qualified as WaiWs
 import Network.WebSockets qualified as WS
 
+import Data.IORef (newIORef)
 import CodeStar.AgentLoop (AgentEnv (..), AgentEvent (..), runAgent)
 import CodeStar.Compaction (CompactionState (..), emptyCompactionState)
 import CodeStar.Compaction qualified as Compaction
@@ -51,10 +52,11 @@ import CodeStar.Context (ContextParts (..), assemble)
 import CodeStar.Context qualified as CC
 import CodeStar.Guardrails qualified as GR
 import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (LlmError (..), buildResolver, withRetry)
+import CodeStar.LLM.Base (LlmClientDict, LlmError (..), withDefaults, withRetry)
+import CodeStar.LLM.OpenAI (newOpenAIClient)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
-import CodeStar.Config.Types (AuthMode (..), JwtAuthConfig (..))
+import CodeStar.Config.Types (AuthMode (..), JwtAuthConfig (..), ModelEntry (..))
 import CodeStar.Platform.Auth (AuthConfig (..), AuthResult (..), Identity (..), authenticate)
 import CodeStar.Platform.Auth.Jwks (newJwksCache)
 import CodeStar.Platform.Auth.Jwt (newJwtValidator, validateToken)
@@ -266,8 +268,11 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
     case sessionResult of
       Left err -> pure (CmdErr err)
       Right session -> do
-        let ApiKey key = config.apiKey
-        baseResolver <- buildResolver config.modelRoles (newAnthropicClient key)
+        let activeEntry = case filter (\m -> m.meName == config.activeModel) config.models of
+              (e:_) -> e
+              []    -> ModelEntry "default" "anthropic" "claude-sonnet-4-20250514"
+                         config.apiKey Nothing Nothing (Just 8192)
+        baseClient <- buildClientForEntry config activeEntry
         resEngine <- newRecoveryEngine defaultRecoveryPolicy
         let SessionId sid0 = session.sessionId
             onRetry err attempt = recorder.recordEvent Tel.EvLlmRetry
@@ -278,7 +283,8 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
                   _                -> 0
               , Tel.lrSessionId      = sid0
               }
-            resolver = \role -> withRetry resEngine onRetry (baseResolver role)
+            client = withRetry resEngine onRetry baseClient
+        clientRef <- newIORef client
         tracker <- newReadTracker
         todoStore <- newTodoStore
         globalCfgDir <- Paths.globalConfigDir
@@ -343,7 +349,7 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
 
         let env =
               AgentEnv
-                { envLlm = resolver
+                { envLlm = clientRef
                 , envTools = registry
                 , envConfig = config
                 , envTelemetry = recorder
@@ -359,6 +365,7 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
                 , envMemoryStore = Just memStore
                 , envWaitForInput = Just waitInput
                 , envWaitForApproval = Just waitApproval
+                , envPendingModel = session.pendingModel
                 }
 
         -- Capture the active OTel context before forking so agent.turn is
@@ -433,12 +440,15 @@ handleCommand config recorder sessionMgr identity conn cmd = case cmd of
   CmdStop{sessionId = sid} -> do
     sessionMgr.destroy sid
     pure CmdOk
+  CmdSetModel{sessionId = sid, modelName = name} ->
+    setSessionModel config sessionMgr sid name
 
 -- --------------------------------------------------------------------
 -- Command helpers
 -- --------------------------------------------------------------------
 
 commandType :: Command -> Text
+commandType CmdSetModel{} = "setModel"
 commandType CmdStart{}   = "start"
 commandType CmdRespond{} = "respond"
 commandType CmdApprove{} = "approve"
@@ -448,6 +458,39 @@ commandType CmdStop{}    = "stop"
 
 commandSessionId :: Command -> Text
 commandSessionId cmd = let SessionId s = cmd.sessionId in s
+
+setSessionModel :: AgentConfig -> SessionManager -> SessionId -> Text -> IO CommandResult
+setSessionModel config sessionMgr sid name = do
+  mSession <- sessionMgr.get sid
+  case mSession of
+    Nothing -> pure (CmdErr "Session not found")
+    Just session -> do
+      case filter (\m -> m.meName == name) config.models of
+        [] -> pure (CmdErr ("Unknown model: " <> name))
+        (entry:_) -> do
+          newClient <- buildClientForEntry config entry
+          atomically $ writeTVar session.pendingModel (Just (name, newClient))
+          pure CmdOk
+
+-- --------------------------------------------------------------------
+-- Model client construction
+-- --------------------------------------------------------------------
+
+buildClientForEntry :: AgentConfig -> ModelEntry -> IO LlmClientDict
+buildClientForEntry config entry =
+  let ApiKey key = if unApiKey entry.meApiKey /= ""
+                   then entry.meApiKey
+                   else config.apiKey
+  in case entry.meProvider of
+    "anthropic" -> do
+      client <- newAnthropicClient key entry.meModel
+      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
+    "openai" -> do
+      client <- newOpenAIClient key entry.meModel
+      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
+    _ -> do
+      client <- newOpenAIClient key entry.meModel
+      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
 
 -- --------------------------------------------------------------------
 -- LLM error labels (mirrored from CLI.hs)

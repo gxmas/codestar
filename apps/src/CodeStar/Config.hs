@@ -3,6 +3,7 @@ module CodeStar.Config
     Config (..)
   , ApiKey (..)
   , ModelSpec (..)
+  , ModelEntry (..)
   , ServerSection (..)
   , TelemetrySection (..)
   , ContextSection (..)

@@ -56,6 +56,10 @@ data Command
   | CmdStop
       { sessionId :: !SessionId
       }
+  | CmdSetModel
+      { sessionId :: !SessionId
+      , modelName :: !Text
+      }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
@@ -95,6 +99,8 @@ instance ToJSON AgentEvent where
     object ["type" .= ("done" :: Text), "signal" .= show sig]
   toJSON (AgentError msg) =
     object ["type" .= ("error" :: Text), "message" .= msg]
+  toJSON (AgentModelChanged from to) =
+    object ["type" .= ("modelChanged" :: Text), "from" .= from, "to" .= to]
 
 instance FromJSON AgentEvent where
   parseJSON = withObject "AgentEvent" $ \o -> do
@@ -109,6 +115,7 @@ instance FromJSON AgentEvent where
       "cost" -> AgentCostUpdate <$> o .: "inputTokens" <*> o .: "outputTokens"
       "done" -> pure (AgentDone (Done emptyEvidence))
       "error" -> AgentError <$> o .: "message"
+      "modelChanged" -> AgentModelChanged <$> o .: "from" <*> o .: "to"
       _ -> fail ("Unknown AgentEvent type: " <> show tag)
 
 emptyEvidence :: Evidence

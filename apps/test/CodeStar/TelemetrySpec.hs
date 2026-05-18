@@ -17,7 +17,7 @@ import CodeStar.Telemetry
   , jsonRecorder
   , noOpRecorder
   )
-import CodeStar.Types (ControlSignal (..), ModelRole (..), TaskType (..))
+import CodeStar.Types (ControlSignal (..), TaskType (..))
 
 spec :: Spec
 spec = describe "CodeStar.Telemetry" $ do
@@ -81,7 +81,7 @@ spec = describe "CodeStar.Telemetry" $ do
       let r = jsonRecorder
       sp <- r.startSpan "json-span" []
       r.recordEvent (EvPlanGenerated{stepCount = 3, taskType = Feature})
-      r.recordEvent (EvLlmCall{modelRole = Architect, inputTokens = 100, outputTokens = 50, cacheCreationTokens = 0, cacheReadTokens = 0, durationMs = 200, modelId = "claude-sonnet", stepNumber = 0, turnNumber = 1})
+      r.recordEvent (EvLlmCall{modelProvider = "anthropic", inputTokens = 100, outputTokens = 50, cacheCreationTokens = 0, cacheReadTokens = 0, durationMs = 200, modelId = "claude-sonnet", stepNumber = 0, turnNumber = 1})
       r.recordEvent (EvCostUpdate 10 20 0.03 "")
       r.recordEvent (EvToolEnd{toolName = "shell", success = False, durationMs = 5, filePath = Nothing, errorReason = Just "permission denied"})
       r.recordEvent (EvCompaction 40 8 0.0 "")

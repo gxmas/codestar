@@ -12,6 +12,7 @@ module CodeStar.Config.Types
   , PartialConfig (..)
 
     -- * Model specification
+  , ModelEntry (..)
   , ModelSpec (..)
 
     -- * Sections
@@ -104,6 +105,27 @@ data ModelSpec = ModelSpec
   , maxTokens   :: !(Maybe Int)
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON)
+
+data ModelEntry = ModelEntry
+  { meName        :: !Text
+  , meProvider    :: !Text
+  , meModel       :: !Text
+  , meApiKey      :: !ApiKey
+  , meTemperature :: !(Maybe Double)
+  , meTopP        :: !(Maybe Double)
+  , meMaxTokens   :: !(Maybe Int)
+  } deriving stock (Eq, Show, Generic)
+
+instance FromJSON ModelEntry where
+  parseJSON = Aeson.withObject "ModelEntry" $ \o ->
+    ModelEntry
+      <$> o .: "name"
+      <*> o .: "provider"
+      <*> o .: "model"
+      <*> (ApiKey <$> o .:? "api_key" .!= "")
+      <*> o .:? "temperature"
+      <*> o .:? "top_p"
+      <*> o .:? "max_tokens"
 
 -- --------------------------------------------------------------------
 -- Enums
@@ -427,6 +449,8 @@ instance Monoid PartialAuthSection where
 data Config = Config
   { provider      :: !Text
   , modelRoles    :: !(Map ModelRole ModelSpec)
+  , models        :: ![ModelEntry]
+  , activeModel   :: !Text
   , planningMode  :: !PlanningMode
   , sandboxMode   :: !SandboxMode
   , authMode      :: !AuthMode
@@ -450,6 +474,8 @@ data Config = Config
 data PartialConfig = PartialConfig
   { provider      :: !(Last Text)
   , modelRoles    :: !(Last (Map ModelRole ModelSpec))
+  , models        :: !(Last [ModelEntry])
+  , activeModel   :: !(Last Text)
   , planningMode  :: !(Last PlanningMode)
   , sandboxMode   :: !(Last SandboxMode)
   , auth         :: !PartialAuthSection
@@ -474,6 +500,8 @@ instance Semigroup PartialConfig where
   a <> b = PartialConfig
     { provider      = a.provider <> b.provider
     , modelRoles    = a.modelRoles <> b.modelRoles
+    , models        = a.models <> b.models
+    , activeModel   = a.activeModel <> b.activeModel
     , planningMode  = a.planningMode <> b.planningMode
     , sandboxMode   = a.sandboxMode <> b.sandboxMode
     , auth          = a.auth <> b.auth
@@ -496,7 +524,8 @@ instance Semigroup PartialConfig where
 
 instance Monoid PartialConfig where
   mempty = PartialConfig
-    { provider = Last Nothing, modelRoles = Last Nothing, planningMode = Last Nothing
+    { provider = Last Nothing, modelRoles = Last Nothing, models = Last Nothing
+    , activeModel = Last Nothing, planningMode = Last Nothing
     , sandboxMode = Last Nothing, auth = mempty, workspacePath = Last Nothing
     , apiKey = Last Nothing, indexStrategy = Last Nothing, permissions = Last Nothing
     , mcpEndpoints = Last Nothing, server = mempty, telemetry = mempty, context = mempty

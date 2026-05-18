@@ -1,11 +1,14 @@
 module CodeStar.Config.Defaults
   ( defaultConfig
+  , defaultModels
+  , defaultActiveModel
   , defaultModelRoles
   ) where
 
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
+import Data.Text (Text)
 
 import CodeStar.Config.Types
 import CodeStar.Types (ModelRole (..), PlanningMode (..))
@@ -14,6 +17,8 @@ defaultConfig :: Config
 defaultConfig = Config
   { provider      = "anthropic"
   , modelRoles    = defaultModelRoles
+  , models        = defaultModels
+  , activeModel   = defaultActiveModel
   , planningMode  = NoPlan
   , sandboxMode   = NoSandbox
   , authMode      = NoAuth
@@ -33,6 +38,14 @@ defaultConfig = Config
   , repomap       = defaultRepoMap
   , memory        = defaultMemory
   }
+
+defaultModels :: [ModelEntry]
+defaultModels =
+  [ ModelEntry "sonnet" "anthropic" "claude-sonnet-4-20250514" (ApiKey "") Nothing Nothing (Just 8192)
+  ]
+
+defaultActiveModel :: Text
+defaultActiveModel = "sonnet"
 
 defaultModelRoles :: Map ModelRole ModelSpec
 defaultModelRoles = Map.fromList

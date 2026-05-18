@@ -33,8 +33,6 @@ import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck
 
 import CodeStar.Telemetry (AgentEvent (..))
-import CodeStar.Types (ModelRole (..))
-import CodeStar.Types.Gen () -- Arbitrary ModelRole
 
 -- ===================================================================
 -- Generators
@@ -74,7 +72,7 @@ genStepTurnSequence = do
 -- | Build an EvLlmCall from step/turn numbers and a model id.
 buildEvLlmCall :: Int -> Int -> Text -> AgentEvent
 buildEvLlmCall step turn mid = EvLlmCall
-  { modelRole = Coder
+  { modelProvider = "anthropic"
   , inputTokens = 100
   , outputTokens = 50
   , cacheCreationTokens = 0

@@ -35,6 +35,7 @@ module CodeStar.LLM.Base
   , withDefaults
   , withRetry
   , buildResolver
+  , buildClientFromEntry
   ) where
 
 import Control.Applicative ((<|>))
@@ -54,7 +55,7 @@ import GHC.Generics (Generic)
 
 import Resilience.Core (RecoveryEngine, withRecoveryEither)
 
-import CodeStar.Config (ModelSpec (..))
+import CodeStar.Config (ModelSpec (..), ModelEntry (..), ApiKey (..))
 import CodeStar.Types (ModelRole)
 
 -- --------------------------------------------------------------------
@@ -238,6 +239,12 @@ buildResolver roleMap factory = do
           | (role, spec) <- pairs
           ]
   pure $ \role -> Map.findWithDefault fallback role clientMap
+
+buildClientFromEntry :: ModelEntry -> (Text -> Text -> IO LlmClientDict) -> IO LlmClientDict
+buildClientFromEntry entry factory = do
+  let ApiKey key = entry.meApiKey
+  client <- factory key entry.meModel
+  pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens client)
 
 {- | Wrap a client with a fallback: on Transient or NetworkError,
 retry the same request once with the fallback client.

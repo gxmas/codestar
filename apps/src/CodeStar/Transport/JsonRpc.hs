@@ -18,6 +18,7 @@ module CodeStar.Transport.JsonRpc
   , sessionRejectMethod
   , sessionCompactMethod
   , sessionStopMethod
+  , sessionSetModelMethod
   ) where
 
 import Data.Aeson (Value (..), encode, toJSON)
@@ -47,7 +48,8 @@ sessionStartMethod
   , sessionApproveMethod
   , sessionRejectMethod
   , sessionCompactMethod
-  , sessionStopMethod ::
+  , sessionStopMethod
+  , sessionSetModelMethod ::
     Text
 sessionStartMethod = "session.start"
 sessionRespondMethod = "session.respond"
@@ -55,6 +57,7 @@ sessionApproveMethod = "session.approve"
 sessionRejectMethod = "session.reject"
 sessionCompactMethod = "session.compact"
 sessionStopMethod = "session.stop"
+sessionSetModelMethod = "session.setModel"
 
 -- --------------------------------------------------------------------
 -- Transport construction
@@ -156,6 +159,16 @@ buildServer handlerRef =
           h <- readIORef handlerRef
           r <- h cmd
           pure (Right (commandResultText r))
+    , RPC.method
+        sessionSetModelMethod
+        ( (\sid m -> CmdSetModel (SessionId sid) m)
+            <$> RPC.param "sessionId"
+            <*> RPC.param "model"
+        )
+        $ \cmd -> do
+          h <- readIORef handlerRef
+          r <- h cmd
+          pure (Right (commandResultText r))
     ]
 
 -- --------------------------------------------------------------------
@@ -212,3 +225,4 @@ agentEventMethod = \case
   AgentCostUpdate{} -> "agent.cost_update"
   AgentDone{} -> "agent.done"
   AgentError{} -> "agent.error"
+  AgentModelChanged{} -> "agent.modelChanged"

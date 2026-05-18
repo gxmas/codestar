@@ -51,8 +51,11 @@ import CodeStar.Config.Paths qualified as Paths
 import CodeStar.Context (ContextParts (..), assemble)
 import CodeStar.Context qualified as CC
 import CodeStar.Guardrails qualified as GR
+import Control.Concurrent.STM (newTVarIO)
+import CodeStar.Config.Types (ModelEntry (..))
 import CodeStar.LLM.Anthropic (newAnthropicClient)
-import CodeStar.LLM.Base (LlmError (..), ToolName (..), buildResolver, withRetry)
+import CodeStar.LLM.Base (LlmClientDict, LlmError (..), ToolName (..), withDefaults, withRetry)
+import CodeStar.LLM.OpenAI (newOpenAIClient)
 import CodeStar.Memory (MemoryEntry (..), loadMemory, newMemoryStore)
 import CodeStar.Permissions (newPermissionStore)
 import CodeStar.Platform.CostTracker (newCostTracker)
@@ -189,8 +192,11 @@ runAgentCli runArgs = do
   (recorder, shutdownRec) <- mkRecorder config.telemetry
 
   resEngine <- newRecoveryEngine defaultRecoveryPolicy
-  let ApiKey key = config.apiKey
-  baseResolver <- buildResolver config.modelRoles (newAnthropicClient key)
+  let activeEntry = case filter (\m -> m.meName == config.activeModel) config.models of
+        (e:_) -> e
+        []    -> ModelEntry "default" "anthropic" "claude-sonnet-4-20250514"
+                   config.apiKey Nothing Nothing (Just 8192)
+  baseClient <- buildClientForEntryCli config activeEntry
   let onRetry err attempt = recorder.recordEvent Tel.EvLlmRetry
         { Tel.retryError       = llmErrorLabel err
         , Tel.retryAttempt     = attempt
@@ -199,7 +205,9 @@ runAgentCli runArgs = do
             _                -> 0
         , Tel.lrSessionId      = ""
         }
-      resolver = \role -> withRetry resEngine onRetry (baseResolver role)
+      client = withRetry resEngine onRetry baseClient
+  clientRef <- newIORef client
+  pendingModelVar <- newTVarIO Nothing
   tracker <- newReadTracker
   todoStore <- newTodoStore
   globalCfgDir <- Paths.globalConfigDir
@@ -250,7 +258,7 @@ runAgentCli runArgs = do
 
       env =
         AgentEnv
-          { envLlm = resolver
+          { envLlm = clientRef
           , envTools = registry
           , envConfig = config
           , envTelemetry = recorder
@@ -266,6 +274,7 @@ runAgentCli runArgs = do
           , envMemoryStore = Just memStore
           , envWaitForInput = Nothing
           , envWaitForApproval = Nothing
+          , envPendingModel = pendingModelVar
           }
 
   ( if runArgs.cliHeadless
@@ -542,3 +551,16 @@ printStaleFingerprintSafetyRail cacheBackend mWorkspace = do
             <> "Run `codestar-cli cache-gc --delete` to clean them."
         )
     else pure ()
+
+buildClientForEntryCli :: Config -> ModelEntry -> IO LlmClientDict
+buildClientForEntryCli config entry =
+  let ApiKey key = if unApiKey entry.meApiKey /= ""
+                   then entry.meApiKey
+                   else config.apiKey
+  in case entry.meProvider of
+    "anthropic" -> do
+      c <- newAnthropicClient key entry.meModel
+      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens c)
+    _ -> do
+      c <- newOpenAIClient key entry.meModel
+      pure (withDefaults entry.meTemperature entry.meTopP entry.meMaxTokens c)

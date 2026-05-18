@@ -208,6 +208,18 @@ handleSlash conn costRef sessionRef reqIdRef cmd = case Text.words cmd of
           "session.compact"
           (object ["sessionId" .= sid, "instruction" .= Text.unwords ws])
     replLoop conn costRef sessionRef reqIdRef
+  ("/model" : ws) -> do
+    let name = Text.unwords ws
+    if Text.null name
+      then outputStrLn "Usage: /model <name>"
+      else withSession sessionRef $ \sid ->
+        liftIO $
+          sendRpcRequest
+            conn
+            reqIdRef
+            "session.setModel"
+            (object ["sessionId" .= sid, "model" .= name])
+    replLoop conn costRef sessionRef reqIdRef
   ["/cost"] -> do
     (inTok, outTok) <- liftIO (readIORef costRef)
     outputStrLn ("Input tokens:  " <> show inTok)
@@ -224,6 +236,7 @@ handleSlash conn costRef sessionRef reqIdRef cmd = case Text.words cmd of
     outputStrLn "  /reject [reason]  reject pending tool call"
     outputStrLn "  /stop             stop current session"
     outputStrLn "  /compact [instr]  compact server-side history"
+    outputStrLn "  /model <name>     switch model (applied at next turn boundary)"
     outputStrLn "  /cost             show accumulated token counts"
     outputStrLn "  /quit             disconnect and exit"
     outputStrLn "  /help             this help"
@@ -285,6 +298,8 @@ renderEvent costRef = \case
     Text.IO.putStrLn ("\n[done: " <> signalText signal <> "]")
   AgentError msg ->
     Text.IO.putStrLn ("[error] " <> msg)
+  AgentModelChanged from to ->
+    Text.IO.putStrLn ("[model] switched from " <> from <> " to " <> to)
 
 signalText :: ControlSignal -> Text
 signalText = \case

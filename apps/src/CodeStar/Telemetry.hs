@@ -131,7 +131,7 @@ import OTel.Exporter.Prometheus
   , PrometheusConfig (..)
   )
 
-import CodeStar.Types (ControlSignal (..), ModelRole (..), TaskType (..))
+import CodeStar.Types (ControlSignal (..), TaskType (..))
 
 -- --------------------------------------------------------------------
 -- Config and lifecycle
@@ -234,7 +234,7 @@ data AgentEvent
       , errorReason :: Maybe Text
       }
   | EvLlmCall
-      { modelRole          :: ModelRole
+      { modelProvider      :: Text
       , inputTokens        :: Int
       , outputTokens       :: Int
       , cacheCreationTokens :: Int
@@ -331,6 +331,12 @@ data AgentEvent
   | EvHistorySize
       { hsSessionId :: Text
       , hsTokensEst :: Int
+      }
+  | EvModelSwitched
+      { msPreviousModel :: Text
+      , msNewModel      :: Text
+      , msSessionId     :: Text
+      , msUserId        :: Text
       }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -440,6 +446,7 @@ otlpRecorderWithHandle settings = do
   outputTokensGauge    <- createGauge         meter "codestar.session.output_tokens"    Nothing
   costGauge            <- createGauge         meter "codestar.session.cost_usd"         Nothing
   historyTokensGauge   <- createGauge         meter "codestar.session.history_tokens"   Nothing
+  modelSwitchesCounter <- createCounter       meter "codestar.model.switches"            Nothing
   activeSessionsUDC    <- createUpDownCounter meter "codestar.sessions.active"          Nothing
   guardrailDenials     <- createCounter       meter "codestar.guardrail.denials"        Nothing
   activeConnsUDC       <- createUpDownCounter meter "codestar.ws.connections_active"    Nothing
@@ -478,6 +485,7 @@ otlpRecorderWithHandle settings = do
         , iBudgetExhaustions  = budgetExhaustCounter
         , iVerifyDuration     = verifyDurationHist
         , iVerifyFailures     = verifyFailCounter
+        , iModelSwitches      = modelSwitchesCounter
         }
 
   pure
@@ -525,6 +533,7 @@ data Instruments = Instruments
   , iBudgetExhaustions  :: SomeCounter
   , iVerifyDuration     :: SomeHistogram
   , iVerifyFailures     :: SomeCounter
+  , iModelSwitches      :: SomeCounter
   }
 
 -- --------------------------------------------------------------------
@@ -586,9 +595,9 @@ recordEventOtlp instr = \case
     counterAdd      instr.iToolCalls    1                          attrs
     histogramRecord instr.iToolDuration (fromIntegral durationMs)  attrs
 
-  EvLlmCall{modelRole, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, durationMs, modelId, stepNumber, turnNumber} -> do
+  EvLlmCall{modelProvider, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, durationMs, modelId, stepNumber, turnNumber} -> do
     let attrs = OTelAttr.fromList
-          [ ("model.role",              StringValue (Text.pack (show modelRole)))
+          [ ("model.provider",          StringValue modelProvider)
           , ("model.id",                StringValue modelId)
           , ("step.number",             Int64Value (fromIntegral stepNumber))
           , ("turn.number",             Int64Value (fromIntegral turnNumber))
@@ -798,6 +807,14 @@ recordEventOtlp instr = \case
   EvHistorySize{hsSessionId, hsTokensEst} ->
     gaugeSet instr.iHistoryTokens (fromIntegral hsTokensEst)
       (OTelAttr.fromList [("session.id", StringValue hsSessionId)])
+  EvModelSwitched{msPreviousModel, msNewModel, msSessionId, msUserId} -> do
+    let attrs = OTelAttr.fromList
+          [ ("model.previous",  StringValue msPreviousModel)
+          , ("model.new",       StringValue msNewModel)
+          , ("session.id",      StringValue msSessionId)
+          , ("user.id",         StringValue msUserId)
+          ]
+    counterAdd instr.iModelSwitches 1 attrs
 
 -- --------------------------------------------------------------------
 -- Helpers

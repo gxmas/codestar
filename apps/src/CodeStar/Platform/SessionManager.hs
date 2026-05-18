@@ -31,6 +31,7 @@ import Data.Text qualified as Text
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 
 import CodeStar.AgentLoop (ApprovalDecision (..))
+import CodeStar.LLM.Base (LlmClientDict)
 import CodeStar.Transport.Types (AgentEventEnvelope (..), CommandResult (..))
 import CodeStar.Types (ControlSignal (..), SessionId (..), UserId (..))
 
@@ -56,6 +57,7 @@ data Session = Session
   , inputMVar :: !(MVar Text)
   , approvalMVar :: !(MVar ApprovalDecision)
   , eventSink :: !(AgentEventEnvelope -> IO ())
+  , pendingModel :: !(TVar (Maybe (Text, LlmClientDict)))
   }
 
 -- --------------------------------------------------------------------
@@ -196,6 +198,7 @@ doCreate cfg ref uid sink = do
       threadVar <- newTVarIO Nothing
       inputVar <- newEmptyMVar
       approvalVar <- newEmptyMVar
+      pendingModelVar <- newTVarIO Nothing
       let sid = SessionId ("session-" <> Text.pack (show (Map.size sessions)))
           session =
             Session
@@ -208,6 +211,7 @@ doCreate cfg ref uid sink = do
               , inputMVar = inputVar
               , approvalMVar = approvalVar
               , eventSink = sink
+              , pendingModel = pendingModelVar
               }
       atomicModifyIORef' ref (\m -> (Map.insert sid session m, ()))
       pure (Right session)
