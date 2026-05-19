@@ -5,6 +5,7 @@ module CodeStar.RepoMap.Worker
   , stopWorker
 
     -- * State access
+  , WorkerStatus (..)
   , getCurrentMap
   , getWorkerStatus
   , getIndexedFiles
@@ -162,21 +163,36 @@ stopWorker worker = killThread worker.rwThreadId
 -- State Access
 -- --------------------------------------------------------------------
 
+-- | A snapshot of the worker's indexing progress, returned by 'getWorkerStatus'.
+data WorkerStatus = WorkerStatus
+  { indexedFileCount :: !Int
+  -- ^ Number of files that have been processed (tags extracted or empty-tagged).
+  , totalTagCount    :: !Int
+  -- ^ Total number of symbol tags across all indexed files.
+  , pendingFileCount :: !Int
+  -- ^ Files changed since the last graph rebuild; non-zero means the
+  --   rendered map may be stale.
+  , queueIsEmpty     :: !Bool
+  -- ^ 'False' while files are waiting to be processed.
+  }
+
 getCurrentMap :: RepoMapWorker -> IO Text
 getCurrentMap worker = atomically $ do
   state <- readTVar worker.rwState
   pure state.wsRendered
 
-getWorkerStatus :: RepoMapWorker -> IO (Int, Int, Int, Int)
-getWorkerStatus worker = do
-  state <- atomically $ readTVar worker.rwState
-  queueLen <- atomically $ queueLength worker.rwQueue
+-- | Sample the worker's current indexing state without blocking.
+getWorkerStatus :: RepoMapWorker -> IO WorkerStatus
+getWorkerStatus worker = atomically $ do
+  state <- readTVar worker.rwState
+  empty <- isEmptyTQueue worker.rwQueue
   let totalTags = sum (map length (Map.elems state.wsTags))
-  pure (Map.size state.wsTags, totalTags, Set.size state.wsPendingFiles, queueLen)
- where
-  queueLength q = do
-    empty <- isEmptyTQueue q
-    if empty then pure 0 else pure (-1) -- Can't easily get length, just empty/non-empty
+  pure WorkerStatus
+    { indexedFileCount = Map.size state.wsTags
+    , totalTagCount    = totalTags
+    , pendingFileCount = Set.size state.wsPendingFiles
+    , queueIsEmpty     = empty
+    }
 
 getIndexedFiles :: RepoMapWorker -> IO [FilePath]
 getIndexedFiles worker = do

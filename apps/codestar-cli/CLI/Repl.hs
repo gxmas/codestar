@@ -57,7 +57,7 @@ import CodeStar.AgentLoop
   , sessionFromEnv
   )
 import CodeStar.Compaction (CompactionState (..))
-import CodeStar.RepoMap.Worker (RepoMapWorker, enqueueAll, getCurrentMap, getIndexedFiles, getWorkerStatus, stopWorker)
+import CodeStar.RepoMap.Worker (RepoMapWorker, WorkerStatus (..), enqueueAll, getCurrentMap, getIndexedFiles, getWorkerStatus, stopWorker)
 import CodeStar.TreeSitter (grammarCount)
 import CodeStar.TreeSitter.Grammars (grammarsDir, knownGrammars)
 import CodeStar.RepoMap.Graph (querySourceModeLabel)
@@ -275,7 +275,7 @@ cmdStatus :: SlashHandler
 cmdStatus session _args = do
   worker <- asks reWorker
   env <- asks reEnv
-  (filesIndexed, totalTags, pending, queueStatus) <- liftIO $ getWorkerStatus worker
+  status <- liftIO $ getWorkerStatus worker
   let grammarsLoaded = grammarCount env.envGrammarReg
   grammarDir <- liftIO grammarsDir
   queryMode <- liftIO querySourceModeLabel
@@ -284,10 +284,10 @@ cmdStatus session _args = do
     outputStrLn $ "Grammars loaded: " <> show grammarsLoaded <> " / " <> show (length knownGrammars)
     mapM_ outputStrLn (grammarWarnings grammarDir grammarsLoaded)
     outputStrLn $ "Query mode: " <> Text.unpack queryMode
-    outputStrLn $ "Files indexed: " <> show filesIndexed
-    outputStrLn $ "Total tags: " <> show totalTags
-    outputStrLn $ "Pending rebuild: " <> show pending
-    outputStrLn $ "Queue: " <> if queueStatus == 0 then "empty" else "processing"
+    outputStrLn $ "Files indexed: " <> show status.indexedFileCount
+    outputStrLn $ "Total tags: " <> show status.totalTagCount
+    outputStrLn $ "Pending rebuild: " <> show status.pendingFileCount
+    outputStrLn $ "Queue: " <> if status.queueIsEmpty then "empty" else "processing"
   pure (KeepSession session)
 
 cmdFiles :: SlashHandler

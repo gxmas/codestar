@@ -19,6 +19,7 @@ import CodeStar.RepoMap.Worker
   , newRepoMapWorker
   , RepoMapWorker
   , stopWorker
+  , WorkerStatus (..)
   )
 import CodeStar.TreeSitter (GrammarRegistry (..))
 
@@ -34,8 +35,8 @@ spec = describe "CodeStar.RepoMap.Worker" $ do
   it "forceRebuild updates worker status without errors" $
     withWorkerEnv $ \worker _workspace -> do
       forceRebuild worker
-      (_files, _totalTags, pendingCount, _queueLen) <- getWorkerStatus worker
-      pendingCount `shouldBe` 0
+      status <- getWorkerStatus worker
+      status.pendingFileCount `shouldBe` 0
 
   it "indexes enqueued files (non-code files become empty-tag entries)" $
     withWorkerEnv $ \worker workspace -> do
@@ -46,8 +47,8 @@ spec = describe "CodeStar.RepoMap.Worker" $ do
         indexed <- getIndexedFiles worker
         pure (target `elem` indexed)
       seen `shouldBe` True
-      (fileCount, _totalTags, _pending, _queueLen) <- getWorkerStatus worker
-      fileCount `shouldSatisfy` (>= 1)
+      status <- getWorkerStatus worker
+      status.indexedFileCount `shouldSatisfy` (>= 1)
 
   it "collapses duplicate enqueue events into one indexed file entry" $
     withWorkerEnv $ \worker workspace -> do
