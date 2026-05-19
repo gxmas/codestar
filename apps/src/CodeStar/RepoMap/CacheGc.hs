@@ -5,7 +5,7 @@ module CodeStar.RepoMap.CacheGc
   , runCacheGc
   ) where
 
-import Data.Aeson (ToJSON)
+import Data.Aeson (ToJSON, ToJSONKey)
 import Data.List (isPrefixOf)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -26,7 +26,7 @@ data StaleReason
   | StaleFile
   | StaleBoth
   deriving stock (Eq, Ord, Show, Generic)
-  deriving anyclass (ToJSON)
+  deriving anyclass (ToJSON, ToJSONKey)
 
 data StaleEntry = StaleEntry
   { staleKey :: !Text
@@ -39,7 +39,7 @@ data CacheGcReport = CacheGcReport
   { scannedEntries :: !Int
   , staleEntries :: !Int
   , deletedEntries :: !Int
-  , staleByReason :: !(Map Text Int)
+  , staleByReason :: !(Map StaleReason Int)
   , entries :: ![StaleEntry]
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (ToJSON)
@@ -84,13 +84,8 @@ runCacheGc store mWorkspace doDelete = do
     mapM_ (\entry -> store.delete nsTags entry.staleKey) stale
     pure (length stale)
 
-countReasons :: [StaleEntry] -> Map Text Int
-countReasons = foldr (\entry -> Map.insertWith (+) (reasonLabel entry.staleReason) 1) Map.empty
-
-reasonLabel :: StaleReason -> Text
-reasonLabel StaleGlobal = "stale-global"
-reasonLabel StaleFile = "stale-file"
-reasonLabel StaleBoth = "stale-both"
+countReasons :: [StaleEntry] -> Map StaleReason Int
+countReasons = foldr (\entry -> Map.insertWith (+) entry.staleReason 1) Map.empty
 
 isFileStale :: FilePath -> UTCTime -> IO Bool
 isFileStale path expectedMtime = do

@@ -27,7 +27,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 
-import CodeStar.RepoMap.CacheGc (CacheGcReport (..), runCacheGc)
+import CodeStar.RepoMap.CacheGc (CacheGcReport (..), StaleReason (..), runCacheGc)
 import CodeStar.Storage (StorageBackend)
 import CodeStar.TreeSitter.Grammars (knownGrammars)
 
@@ -66,8 +66,8 @@ grammarWarnings grammarDir loadedCount
 printStaleFingerprintSafetyRail :: StorageBackend -> Maybe FilePath -> IO ()
 printStaleFingerprintSafetyRail cacheBackend mWorkspace = do
   gcReport <- runCacheGc cacheBackend mWorkspace False
-  let staleGlobal = Map.findWithDefault 0 "stale-global" gcReport.staleByReason
-      staleBoth = Map.findWithDefault 0 "stale-both" gcReport.staleByReason
+  let staleGlobal = Map.findWithDefault 0 StaleGlobal gcReport.staleByReason
+      staleBoth   = Map.findWithDefault 0 StaleBoth   gcReport.staleByReason
       staleFingerprint = staleGlobal + staleBoth
   if staleFingerprint > 0
     then

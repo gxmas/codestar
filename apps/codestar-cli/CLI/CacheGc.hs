@@ -66,24 +66,20 @@ printCacheGcReport deleted gcReport = do
  where
   printReason reason =
     Text.IO.putStrLn
-      (reasonLabel reason <> ": " <> tshow (Map.findWithDefault 0 (reasonLabelInline reason) gcReport.staleByReason))
+      (displayLabel reason <> ": " <> tshow (Map.findWithDefault 0 reason gcReport.staleByReason))
 
-  reasonLabel StaleGlobal = "  stale-global"
-  reasonLabel StaleFile = "  stale-file"
-  reasonLabel StaleBoth = "  stale-both"
+  displayLabel StaleGlobal = "  stale-global"
+  displayLabel StaleFile   = "  stale-file"
+  displayLabel StaleBoth   = "  stale-both"
 
   printEntry entry =
     Text.IO.putStrLn
       ( "  - "
           <> maybe "<unknown-path>" Text.pack entry.stalePath
           <> " ["
-          <> reasonLabelInline entry.staleReason
+          <> displayLabel entry.staleReason
           <> "]"
       )
-
-  reasonLabelInline StaleGlobal = "stale-global"
-  reasonLabelInline StaleFile = "stale-file"
-  reasonLabelInline StaleBoth = "stale-both"
 
 tshow :: Show a => a -> Text
 tshow = Text.pack . show
