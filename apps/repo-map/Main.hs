@@ -25,7 +25,7 @@ import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 
 import CodeStar.RepoMap.Cache (RepoMapCache (..), newRepoMapCache)
-import CodeStar.RepoMap.CacheGc (CacheGcReport (..), runCacheGc)
+import CodeStar.RepoMap.CacheGc (CacheGcReport (..), StaleReason (..), runCacheGc)
 import CodeStar.RepoMap.Graph
   ( SymbolGraph (..)
   , Tag (..)
@@ -629,8 +629,8 @@ printStaleFingerprintSafetyRail opts = do
 printStaleFingerprintSafetyRailFor :: StorageBackend -> FilePath -> IO ()
 printStaleFingerprintSafetyRailFor backend workspace = do
   gcReport <- runCacheGc backend (Just workspace) False
-  let staleGlobal = Map.findWithDefault 0 "stale-global" gcReport.staleByReason
-      staleBoth = Map.findWithDefault 0 "stale-both" gcReport.staleByReason
+  let staleGlobal = Map.findWithDefault 0 StaleGlobal gcReport.staleByReason
+      staleBoth   = Map.findWithDefault 0 StaleBoth   gcReport.staleByReason
       staleFingerprint = staleGlobal + staleBoth
   when (staleFingerprint > 0) $
     putStrLn $

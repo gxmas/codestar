@@ -99,10 +99,15 @@ mkHaskellDefinitionTag srcLines path node = do
   let row = fromIntegral pt.row
       col = fromIntegral pt.column
       name = wordAt srcLines row col
+      -- Top-level Haskell definitions (functions, type signatures, data
+      -- declarations …) always start at column 0. Identifiers at column > 0
+      -- appear inside where/let/do blocks and would produce spurious or
+      -- duplicate tags, so we exclude them.
+      isTopLevel = col == 0
   pure
     [ Tag path name row Definition
     | not (Text.null name)
-    , col == 0
+    , isTopLevel
     , not (name `Set.member` haskellNoiseNames)
     ]
 
