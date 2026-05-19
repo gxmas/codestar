@@ -1,3 +1,20 @@
+{- |
+= Graph.Extract.Types — shared types for the extraction pipeline
+
+This module defines the core vocabulary that flows through every layer of
+the repo-map extraction pipeline:
+
+  * 'Tag' — a single symbol occurrence (definition or reference) with its
+    file, name, line, and kind.
+  * 'TagKind' — whether the tag is a definition or a reference.
+  * 'TagExtraction' — the outcome of trying to extract tags from one file.
+  * 'ExtractionSkip' — why a file was intentionally skipped.
+  * 'namedChildren' — Tree-sitter utility shared by all language extractors.
+
+Keeping these types in one place avoids import cycles: the language
+modules (@Haskell@, @Python@, @TypeScript@) import from here but not from
+each other, and the dispatcher (@Extract@) imports from all of them.
+-}
 module CodeStar.RepoMap.Graph.Extract.Types
   ( TagKind (..)
   , Tag (..)
@@ -27,14 +44,18 @@ data ExtractionSkip
   --   library (@.so@ / @.dylib@) has not been loaded.
   deriving stock (Eq, Show)
 
+-- | Whether a tag marks the point where a symbol is __defined__ or a point
+-- where it is __used__ (referenced).  Only definitions appear in the final
+-- repo map; references are used to build the symbol graph for PageRank.
 data TagKind = Definition | Reference
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | A symbol occurrence extracted from a source file.
 data Tag = Tag
-  { tagFile :: !FilePath
-  , tagName :: !Text
-  , tagLine :: !Int
+  { tagFile :: !FilePath -- ^ Absolute or workspace-relative path.
+  , tagName :: !Text     -- ^ The identifier text (e.g. @"parseCliArgs"@).
+  , tagLine :: !Int      -- ^ 0-based source line where the symbol appears.
   , tagKind :: !TagKind
   }
   deriving stock (Eq, Ord, Show, Generic)
@@ -52,11 +73,16 @@ data TagExtraction
   --   human-readable reason suitable for logging.
   deriving stock (Eq, Show)
 
+-- | Extract the identifier word starting at column @col@ on line @row@
+-- of the source line vector.  Reads characters until a non-identifier
+-- character is encountered (see 'isIdentChar').
 wordAt :: V.Vector Text -> Int -> Int -> Text
 wordAt ls row col
   | row >= V.length ls = Text.empty
   | otherwise = Text.takeWhile isIdentChar (Text.drop col (ls V.! row))
 
+-- | Characters that may appear inside an identifier.
+-- Includes @\'@ to capture Haskell primed names like @x\'@.
 isIdentChar :: Char -> Bool
 isIdentChar c = isAlphaNum c || c == '_' || c == '\''
 

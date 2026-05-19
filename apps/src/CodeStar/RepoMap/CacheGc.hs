@@ -1,3 +1,25 @@
+{- |
+= CodeStar.RepoMap.CacheGc — tag-cache garbage collection
+
+Each extracted tag list is cached on disk keyed by the file path, its
+modification time, and an __extractor fingerprint__.  The fingerprint
+changes when the extractor version or grammar set changes, making old
+entries __stale__.  This module scans the cache, classifies each entry,
+and optionally deletes the stale ones.
+
+A cache entry can be stale for two independent reasons:
+
+  * __StaleGlobal__: the fingerprint does not match 'currentTagsFingerprint'.
+    The entry was written by an older (or newer) extractor; the tags may no
+    longer be accurate.
+  * __StaleFile__: the file's modification time on disk no longer matches
+    the mtime baked into the cache key.  The file has changed since the
+    tags were extracted.
+  * __StaleBoth__: both conditions apply.
+
+The @cache-gc@ CLI sub-command in "CLI.CacheGc" is the public interface
+to this module.
+-}
 module CodeStar.RepoMap.CacheGc
   ( StaleReason (..)
   , StaleEntry (..)
@@ -21,29 +43,52 @@ import CodeStar.Storage (StorageBackend (..))
 nsTags :: Text
 nsTags = "repomap:tags"
 
+-- | Why a cache entry is considered stale.
 data StaleReason
   = StaleGlobal
+  -- ^ Extractor fingerprint mismatch — entry was written by a different
+  --   extractor version.  Safe to delete; the next extraction will
+  --   regenerate it with the current fingerprint.
   | StaleFile
+  -- ^ File modification time mismatch — the source file has changed
+  --   since the tags were extracted.
   | StaleBoth
+  -- ^ Both the fingerprint and the mtime are stale.
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, ToJSONKey)
 
+-- | A single stale cache entry identified during a GC scan.
 data StaleEntry = StaleEntry
-  { staleKey :: !Text
-  , stalePath :: !(Maybe FilePath)
+  { staleKey    :: !Text
+  -- ^ The raw storage key, used to delete the entry.
+  , stalePath   :: !(Maybe FilePath)
+  -- ^ The source file path decoded from the key, if parseable.
   , staleReason :: !StaleReason
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (ToJSON)
 
+-- | Summary of a GC scan, returned by 'runCacheGc' and serialised as JSON
+-- for the @--json@ flag of the CLI command.
 data CacheGcReport = CacheGcReport
   { scannedEntries :: !Int
-  , staleEntries :: !Int
+  -- ^ Total number of cache entries inspected.
+  , staleEntries   :: !Int
+  -- ^ Number of stale entries found.
   , deletedEntries :: !Int
-  , staleByReason :: !(Map StaleReason Int)
-  , entries :: ![StaleEntry]
+  -- ^ Number of stale entries actually deleted (0 unless @doDelete@ was 'True').
+  , staleByReason  :: !(Map StaleReason Int)
+  -- ^ Count of stale entries broken down by 'StaleReason'.
+  , entries        :: ![StaleEntry]
+  -- ^ Full list of stale entries for human-readable display.
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (ToJSON)
 
+-- | Scan the tag cache, classify entries as stale or live, and optionally
+-- delete the stale ones.
+--
+-- @mWorkspace@: if 'Just', only entries whose path falls under that
+-- directory are considered; entries from other workspaces are ignored.
+-- @doDelete@: when 'True', stale entries are deleted from the store.
 runCacheGc :: StorageBackend -> Maybe FilePath -> Bool -> IO CacheGcReport
 runCacheGc store mWorkspace doDelete = do
   workspaceAbs <- traverse makeAbsolute mWorkspace
@@ -84,9 +129,12 @@ runCacheGc store mWorkspace doDelete = do
     mapM_ (\entry -> store.delete nsTags entry.staleKey) stale
     pure (length stale)
 
+-- | Tally stale entries by their 'StaleReason'.
 countReasons :: [StaleEntry] -> Map StaleReason Int
 countReasons = foldr (\entry -> Map.insertWith (+) entry.staleReason 1) Map.empty
 
+-- | Return 'True' if the file's current mtime differs from @expectedMtime@,
+-- or if the file no longer exists.
 isFileStale :: FilePath -> UTCTime -> IO Bool
 isFileStale path expectedMtime = do
   result <- try (getModificationTime path) :: IO (Either IOException UTCTime)
@@ -108,6 +156,8 @@ normalizePath = map normalizeSep
   normalizeSep '\\' = '/'
   normalizeSep c = c
 
+-- | Monadic 'Data.Maybe.mapMaybe': run an IO action for each element,
+-- collect the 'Just' results, discard the 'Nothing' ones.
 mapMaybeM :: (a -> IO (Maybe b)) -> [a] -> IO [b]
 mapMaybeM f xs = go xs []
  where

@@ -1,3 +1,40 @@
+{- |
+= CodeStar.RepoMap.Worker — incremental background repo-map indexer
+
+The 'RepoMapWorker' runs a background thread that continuously processes
+files from a queue, extracting Tree-sitter tags and rebuilding the rendered
+repo map whenever enough files have been processed.
+
+== Design
+
+@
+  ┌──────────────────────────────────────────────────────┐
+  │  background thread (workerLoop)                      │
+  │                                                      │
+  │  queue ──► processFile ──► WorkerState.tags          │
+  │                                     │                │
+  │                                     ▼                │
+  │              checkShouldRebuild ──► rebuildGraph      │
+  │                                     │                │
+  │                                     ▼                │
+  │                              WorkerState.renderedMap │
+  │                                     │                │
+  │                                     ▼                │
+  │                              rwUpdates (broadcast)   │
+  └──────────────────────────────────────────────────────┘
+@
+
+== Key choices
+
+  * __Incremental__: the worker processes one file at a time so it can
+    interleave with other threads.  The repo map is rebuilt at most every
+    2 seconds to avoid thrashing during large edits.
+  * __Cache-aware__: 'processCodeFile' checks the tag cache before parsing;
+    only files with changed modification times are re-extracted.
+  * __Broadcast channel__: 'subscribeToUpdates' returns a 'TChan' that
+    receives the rendered map every time it is rebuilt, allowing multiple
+    consumers (future IDE/web clients) without extra coupling.
+-}
 module CodeStar.RepoMap.Worker
   ( -- * Worker handle
     RepoMapWorker (..)
@@ -119,6 +156,10 @@ defaultWorkerConfig =
     , wcBatchSize = 10
     }
 
+-- | Construct and start a 'RepoMapWorker' for the given workspace.
+-- The background indexing thread starts immediately; all workspace files
+-- are enqueued for processing in a second background thread so the caller
+-- is not blocked.
 newRepoMapWorker ::
   GrammarRegistry ->
   RepoMapCache ->
@@ -157,6 +198,7 @@ newRepoMapWorker grammarReg cache workspace = do
       , rwConfig = renderCfg
       }
 
+-- | Kill the background indexing thread.  Safe to call multiple times.
 stopWorker :: RepoMapWorker -> IO ()
 stopWorker worker = killThread worker.rwThreadId
 
@@ -177,6 +219,8 @@ data WorkerStatus = WorkerStatus
   -- ^ 'False' while files are waiting to be processed.
   }
 
+-- | Read the most recently rendered repo map.  Returns 'Text.empty' if
+-- no rebuild has completed yet (the worker has just started).
 getCurrentMap :: RepoMapWorker -> IO Text
 getCurrentMap worker = atomically $ do
   state <- readTVar worker.rwState
@@ -195,11 +239,16 @@ getWorkerStatus worker = atomically $ do
     , queueIsEmpty     = empty
     }
 
+-- | Return the list of files that have been processed (whether or not
+-- tags were successfully extracted).
 getIndexedFiles :: RepoMapWorker -> IO [FilePath]
 getIndexedFiles worker = do
   state <- atomically $ readTVar worker.rwState
   pure (Map.keys state.tags)
 
+-- | Subscribe to the rendered-map broadcast channel.  Each rebuild writes
+-- the new rendered text to this channel.  Use 'atomically readTChan' to
+-- wait for the next update.
 subscribeToUpdates :: RepoMapWorker -> IO (TChan Text)
 subscribeToUpdates worker = atomically $ dupTChan worker.rwUpdates
 
@@ -207,14 +256,22 @@ subscribeToUpdates worker = atomically $ dupTChan worker.rwUpdates
 -- Manual Operations
 -- --------------------------------------------------------------------
 
+-- | Add a single file to the processing queue.  The file will be
+-- (re-)indexed on the next batch cycle.  Call this after editing a file
+-- to keep the repo map up to date.
 enqueueFile :: RepoMapWorker -> FilePath -> IO ()
 enqueueFile worker path = atomically $ writeTQueue worker.rwQueue path
 
+-- | Enqueue every file in the workspace for re-indexing.
+-- Use this after a large refactor or when the repo map looks stale.
 enqueueAll :: RepoMapWorker -> IO ()
 enqueueAll worker = do
   files <- listWorkspaceFiles worker.rwWorkspace
   atomically $ mapM_ (writeTQueue worker.rwQueue) files
 
+-- | Rebuild the rendered repo map immediately from the current tag index,
+-- bypassing the debounce interval.  Used in tests and the @\/rescan@
+-- REPL command to get a fresh map on demand.
 forceRebuild :: RepoMapWorker -> IO ()
 forceRebuild worker = do
   state <- atomically $ readTVar worker.rwState

@@ -1,3 +1,34 @@
+{- |
+= Graph.Extract — Tree-sitter tag extraction dispatcher
+
+This module is the __entry point__ into the tag-extraction pipeline.  It
+decides which language-specific extractor to invoke based on the file
+extension, then delegates to one of:
+
+  * 'extractHaskellWithLang' — query-driven + AST walk fallback
+  * 'extractPythonWithLang' — query-driven + AST walk fallback
+  * 'extractTypeScriptWithLang' — query-driven + AST walk fallback
+  * 'extractGenericWithLang' — AST walk only, for all other supported languages
+
+== Query loading
+
+The preferred way to extract definitions is via a __Tree-sitter query__
+(@.scm@ file).  Queries can be loaded from:
+
+1. A file path given by @CODESTAR_QUERIES_DIR@ (for development / overrides).
+2. The compiled-in 'ByteString' asset (the default for deployed builds).
+
+If @CODESTAR_QUERIES_STRICT=1@ is set and the query file cannot be loaded
+or compiled, extraction fails hard rather than silently falling back —
+useful for catching query regressions in CI.
+
+== Generic walker
+
+For languages without a dedicated extractor, 'walkGenericNode' does a
+depth-first traversal of the AST, emitting a 'Definition' tag for every
+identifier directly inside a known definition node type and a 'Reference'
+tag for every standalone identifier.
+-}
 module CodeStar.RepoMap.Graph.Extract
   ( extractTags
   , extractTagsDetailed
@@ -43,6 +74,8 @@ extractTags registry path src = do
     Extracted tags -> tags
     _ -> []
 
+-- | Like 'extractTags' but returns the full 'TagExtraction' so callers can
+-- distinguish a successful empty result from a skip or failure.
 extractTagsDetailed :: GrammarRegistry -> FilePath -> ByteString -> IO TagExtraction
 extractTagsDetailed registry path src =
   case languageForFile path of
@@ -179,6 +212,10 @@ extractPythonWithLang lang path src = do
                   tags <- Python.extractPythonTagsByQuery srcLines path query root
                   pure (Extracted tags)
 
+-- | Depth-first AST walk for languages without a dedicated query.
+-- Emits 'Definition' tags for identifier children of definition nodes
+-- and 'Reference' tags for all other leaf identifiers.
+-- Bounded by 'maxDepth' and 'maxChildren' to avoid pathological inputs.
 walkGenericNode :: V.Vector Text -> FilePath -> Node -> IO [Tag]
 walkGenericNode srcLines path = go 0
  where
@@ -206,6 +243,8 @@ walkGenericNode srcLines path = go 0
                 childTags <- concat <$> mapM (go (depth + 1)) children
                 pure (ownTags ++ childTags)
 
+-- | Emit a 'Definition' tag if the node is a leaf identifier, otherwise
+-- return empty.  Used to extract the name from a definition node's children.
 tryExtractAsDefinition :: V.Vector Text -> FilePath -> Node -> IO [Tag]
 tryExtractAsDefinition srcLines path node = do
   typ <- TS.nodeType node
@@ -261,12 +300,23 @@ identifierTypes =
     , "operator"
     ]
 
+-- | A successfully loaded Tree-sitter query, together with metadata about
+-- where it came from (for error messages) and whether a compilation failure
+-- should be treated as fatal.
 data LoadedQuery = LoadedQuery
-  { bytes :: !ByteString
-  , origin :: !FilePath
+  { bytes         :: !ByteString
+  -- ^ The raw @.scm@ query source.
+  , origin        :: !FilePath
+  -- ^ Human-readable description of the source (e.g. @"embedded asset"@
+  --   or a file path).
   , strictFailure :: !Bool
+  -- ^ When 'True', a query compilation failure returns 'ExtractFailed'
+  --   instead of silently falling back to the embedded query.
   }
 
+-- | Return a human-readable description of the active query-loading mode,
+-- shown in the CLI @\/status@ command so operators know which query files
+-- are in effect.
 querySourceModeLabel :: IO Text
 querySourceModeLabel = do
   mDir <- lookupEnv "CODESTAR_QUERIES_DIR"
@@ -278,6 +328,10 @@ querySourceModeLabel = do
         then "filesystem-strict"
         else "filesystem-preferred-with-embedded-fallback"
 
+-- | Load a query, trying the filesystem first (if @CODESTAR_QUERIES_DIR@ is
+-- set) and falling back to the compiled-in @embedded@ bytes.
+-- Returns @Left err@ only when strict mode is enabled and the file is
+-- missing or unreadable.
 loadDefinitionQuery :: FilePath -> ByteString -> IO (Either Text LoadedQuery)
 loadDefinitionQuery fileName embedded = do
   mDir <- lookupEnv "CODESTAR_QUERIES_DIR"

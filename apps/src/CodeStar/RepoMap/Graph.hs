@@ -1,4 +1,43 @@
+{- |
+= CodeStar.RepoMap.Graph — symbol graph and PageRank
 
+This module is the __analytical heart__ of the repo map.  It takes raw
+symbol tags (definitions and references extracted by the Tree-sitter
+pipeline) and produces a ranked list of files so that the most relevant
+files appear first in the context window.
+
+== Pipeline
+
+@
+  [Tag]                               -- raw definitions + references
+      │
+      ▼
+  buildSymbolGraph                    -- build a file-level dependency graph
+      │                               -- edges: referencing file → defining file
+      ▼
+  SymbolGraph
+      │
+      ▼
+  pageRank                            -- personalised PageRank
+      │  chatFiles / mentionedIdents boost
+      ▼
+  Map FilePath Double                 -- score per file
+      │
+      ▼
+  Render.renderRepoMap                -- select top files, format as text
+@
+
+== Why PageRank?
+
+File importance in a codebase is not uniform: utility modules that are
+imported everywhere should appear in the context more often than leaf
+files that import nothing.  PageRank naturally captures this — a file
+gains score by being pointed to by many other files.
+
+Personalisation (the @chatFiles@ and @mentionedIdents@ parameters)
+boosts files that are directly relevant to the current conversation,
+tilting the ranking towards the task at hand.
+-}
 module CodeStar.RepoMap.Graph
   ( -- * Tags
     Tag (..)
@@ -56,6 +95,10 @@ data SymbolGraph = SymbolGraph
   }
   deriving stock (Show)
 
+-- | Build a 'SymbolGraph' from a flat list of tags.
+-- Definitions populate the symbol→file lookup table; references create
+-- directed edges from the referencing file to the file(s) where the
+-- referenced symbol is defined.
 buildSymbolGraph :: [Tag] -> SymbolGraph
 buildSymbolGraph tags =
   let defs = [t | t <- tags, t.tagKind == Definition]
@@ -90,10 +133,15 @@ addEdge defMap edges ref =
 -- PageRank
 -- --------------------------------------------------------------------
 
+-- | Personalisation weights for 'pageRank'.
+-- Increase a weight to boost that class of file in the ranking.
 data PageRankWeights = PageRankWeights
-  { chatWeight :: !Double -- boost for open chat files (50×)
-  , mentionedWeight :: !Double -- boost for files defining mentioned symbols (10×)
-  , privateWeight :: !Double -- penalty multiplier for private-only files (0.1×)
+  { chatWeight      :: !Double
+  -- ^ Additive boost for files that are currently open in chat (default 50×).
+  , mentionedWeight :: !Double
+  -- ^ Boost for files that define a symbol mentioned in the conversation (default 10×).
+  , privateWeight   :: !Double
+  -- ^ Multiplier for files that appear private (currently unused, reserved for future use).
   }
   deriving stock (Eq, Show)
 
@@ -137,6 +185,9 @@ pageRank graph chatFiles mentionedIdents w =
               finalPR = iterate (stepPageRank n adj personal dampingFactor) initPR !! iterationCount
            in Map.fromList [(idxFile Map.! i, finalPR !! i) | i <- [0 .. n - 1]]
 
+-- | Build the personalisation vector for PageRank.
+-- Each file's base score is 1.0; chat files and files defining mentioned
+-- symbols receive additive boosts.  The vector is normalised to sum to 1.
 personalVector ::
   SymbolGraph ->
   [FilePath] ->
@@ -184,6 +235,10 @@ buildAdjMatrix graph fileIdx =
                 else 1.0 / fromIntegral (length toIdxs)
          in foldl' (\m' toIdx -> Map.insert (toIdx, fromIdx) weight m') m toIdxs
 
+-- | One iteration of the PageRank power method.
+-- Each node's new score is a weighted sum of its neighbours' scores
+-- (the link-following term) plus a personalisation term (the teleportation
+-- term).  Repeating this 100 times gives a converged result.
 stepPageRank :: Int -> Map (Int, Int) Double -> [Double] -> Double -> [Double] -> [Double]
 stepPageRank n adj personal d pr =
   [ (1 - d) * personal !! i

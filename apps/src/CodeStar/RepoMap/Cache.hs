@@ -1,3 +1,26 @@
+{- |
+= CodeStar.RepoMap.Cache — persistent tag and map caching
+
+Parsing source files with Tree-sitter is fast but not free.  This module
+caches two kinds of results on disk via 'StorageBackend' so that neither
+the background 'Worker' nor 'buildRepoMapSafe' has to redo work between
+agent sessions:
+
+  * __Tag cache__ (@repomap:tags@ namespace): maps a @(path, mtime)@ pair
+    to the extracted @[Tag]@ list.  The cache key also embeds a
+    __fingerprint__ derived from the extractor version and the set of
+    loaded grammars, so entries from old extractor versions are
+    automatically ignored.
+  * __Map cache__ (@repomap:maps@ namespace): maps a hash of
+    @(files, maxTokens, mentionedIdents)@ to a rendered map string.
+
+Both caches are __write-through__: a hit returns the cached value
+immediately; a miss computes the value, stores it, and returns it.
+
+The 'RepoMapCache' record is a __dictionary of functions__ (a "record of
+closures" idiom).  This makes it easy to swap in a no-op cache for tests
+without defining a type class.
+-}
 module CodeStar.RepoMap.Cache
   ( -- * Cache handle
     RepoMapCache (..)
@@ -39,30 +62,49 @@ nsMaps = "repomap:maps"
 tagsKeyVersion :: Text
 tagsKeyVersion = "v2"
 
+-- | A stable hash of the current extractor version and grammar set.
+-- Embedded in every tag-cache key; when it changes (e.g. after adding a
+-- new grammar), old cache entries are classified as stale by 'CacheGc'.
 currentTagsFingerprint :: Text
 currentTagsFingerprint = Text.pack (show (abs (hash basis :: Int)))
  where
   basis :: String
   basis = show (2 :: Int, 1 :: Int, map show knownGrammars)
 
+-- | Parsed components of a tag-cache key, used by 'CacheGc' to classify
+-- entries as stale without needing to deserialise the cached tags.
 data TagsKeyInfo = TagsKeyInfo
   { tkiFingerprint :: !(Maybe Text)
+  -- ^ The extractor fingerprint embedded in the key.  'Nothing' for
+  --   legacy keys that predate versioning.
   , tkiPath :: !FilePath
+  -- ^ Absolute path of the source file.
   , tkiMtime :: !UTCTime
+  -- ^ Modification time of the file when the tags were extracted.
   } deriving stock (Eq, Show)
 
 -- --------------------------------------------------------------------
 -- Cache handle
 -- --------------------------------------------------------------------
 
+-- | A bundle of caching operations backed by a 'StorageBackend'.
+-- Construct one with 'newRepoMapCache'; pass a no-op record in tests.
 data RepoMapCache = RepoMapCache
   { getTags :: FilePath -> UTCTime -> IO (Maybe [Tag])
+  -- ^ Look up cached tags for a file at a given modification time.
+  --   Returns 'Nothing' on a cache miss or a fingerprint mismatch.
   , putTags :: FilePath -> UTCTime -> [Tag] -> IO ()
+  -- ^ Store extracted tags for a file.
   , getMap :: Text -> IO (Maybe Text)
+  -- ^ Look up a rendered repo map by its cache key.
   , putMap :: Text -> Text -> IO ()
+  -- ^ Store a rendered repo map.
   , invalidate :: FilePath -> IO ()
+  -- ^ Delete all tag-cache entries for a file (called after an edit so
+  --   the next extraction does not return stale tags).
   }
 
+-- | Construct a 'RepoMapCache' backed by the given storage backend.
 newRepoMapCache :: StorageBackend -> RepoMapCache
 newRepoMapCache store =
   RepoMapCache
@@ -87,6 +129,9 @@ tagsKey path mtime =
     , escapeKeyComponent (Text.pack (show mtime))
     ]
 
+-- | Parse a raw storage key back into its components.
+-- Supports both the current @v2:fingerprint:path:mtime@ format and the
+-- legacy @path:mtime@ format (which has no fingerprint).
 parseTagsCacheKey :: Text -> Maybe TagsKeyInfo
 parseTagsCacheKey key =
   parseVersioned key <|> parseLegacy key
@@ -216,6 +261,8 @@ getOrComputeMap cache files maxTok mentioned compute = do
       cache.putMap key rendered
       pure rendered
 
+-- | Read the modification time of a file, returning 'Nothing' if the
+-- file does not exist or is otherwise inaccessible.
 safeGetMtime :: FilePath -> IO (Maybe UTCTime)
 safeGetMtime path = do
   result <- try (getModificationTime path) :: IO (Either IOException UTCTime)
@@ -223,6 +270,8 @@ safeGetMtime path = do
     Left e -> if isDoesNotExistError e then Nothing else Nothing
     Right t -> Just t
 
+-- | Percent-encode @:@ and @/@ so they cannot be confused with key
+-- separators when embedded in a cache key component.
 escapeKeyComponent :: Text -> Text
 escapeKeyComponent =
   Text.replace "%" "%25"

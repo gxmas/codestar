@@ -1,3 +1,34 @@
+{- |
+= CodeStar.RepoMap.Render — format tags into an LLM-friendly repo map
+
+The repo map is the text that the agent injects into the LLM's context
+window to give it a structural overview of the codebase.  The format is
+intentionally compact:
+
+@
+  path\/to\/file.py:
+      functionName
+      ClassName
+  another\/file.hs:
+      parseCliArgs
+      runAgent
+@
+
+== Fitting the token budget
+
+The LLM's context window is finite, so the renderer must select which
+files to include.  The algorithm is:
+
+1. __Rank__ all definition tags by their file's PageRank score (most
+   important files first), then alphabetically within the same file.
+2. __Binary search__ for the largest prefix that fits within the
+   @maxTokens@ budget (with a @tolerance@ margin so we fill close to the
+   limit rather than leaving large gaps).
+3. __Format__ the selected tags into the compact text block.
+
+Token estimation uses the heuristic that one token ≈ 4 characters, which
+is accurate enough for GPT/Claude-family models.
+-}
 module CodeStar.RepoMap.Render
   ( -- * Rendering
     renderRepoMap
@@ -29,11 +60,14 @@ import CodeStar.RepoMap.Graph (SymbolGraph (..), Tag (..), TagKind (..))
 -- Config
 -- --------------------------------------------------------------------
 
+-- | Configuration for 'renderRepoMap'.
 data RenderConfig = RenderConfig
   { maxTokens :: !Int
-  -- ^ hard token budget
+  -- ^ Hard token budget.  The renderer will not exceed this count.
   , tolerance :: !Double
-  -- ^ how close to fill the budget (0.15 = within 15%)
+  -- ^ How close to the budget to aim for.  @0.15@ means the renderer
+  --   tries to fill at least 85% of the budget rather than stopping as
+  --   soon as it crosses a coarse boundary.
   }
   deriving stock (Eq, Show)
 
@@ -68,7 +102,9 @@ renderRepoMap tags scores _graph cfg =
       selected = binarySearchFit ranked cfg.maxTokens cfg.tolerance
    in formatSelected selected
 
--- | Sort definitions by descending file PageRank score, then by name.
+-- | Sort definition tags by descending file PageRank score, breaking ties
+-- alphabetically by symbol name.  The result determines the order in which
+-- files appear in the rendered map.
 rankDefs :: [Tag] -> Map FilePath Double -> [Tag]
 rankDefs defs scores =
   sortBy (comparing (\t -> Down (Map.findWithDefault 0.0 t.tagFile scores, t.tagName))) defs
@@ -109,6 +145,9 @@ formatSelected tags =
         entries = map (\n -> "    " <> n) (Set.toAscList names)
      in Text.unlines (header : entries)
 
+-- | Group tags by file path, collecting symbol names into a 'Set' to
+-- deduplicate identical names that appear on multiple lines (e.g. multi-clause
+-- function definitions in Haskell).
 groupByFile :: [Tag] -> Map FilePath (Set Text)
 groupByFile =
   foldr

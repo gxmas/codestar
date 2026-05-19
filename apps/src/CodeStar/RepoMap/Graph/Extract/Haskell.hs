@@ -1,3 +1,25 @@
+{- |
+= Graph.Extract.Haskell — Haskell-specific tag extraction
+
+Haskell's grammar is unusual in that top-level definitions always start at
+column 0, while local @where@\/@let@\/@do@ bindings are indented.  This
+module exploits that invariant to produce clean definition tags without
+capturing local variables as false positives.
+
+== Two extraction strategies
+
+  1. __Query-driven__ ('extractHaskellDefinitionsByQuery'): uses a
+     Tree-sitter @.scm@ query to precisely capture declaration heads.
+     This is the preferred path when grammars and queries are available.
+
+  2. __AST walk__ ('walkHaskellDefinitions'): a depth-first traversal
+     that tracks whether the current node is inside a definition context
+     and emits a tag for any leaf identifier at column 0.  Used as a
+     fallback when query compilation fails.
+
+The 'haskellDefinitionQueryEmbedded' constant contains the compiled-in
+@.scm@ query so the binary works without any external files.
+-}
 module CodeStar.RepoMap.Graph.Extract.Haskell
   ( haskellDefinitionQueryFile
   , haskellDefinitionQueryEmbedded
@@ -19,9 +41,14 @@ import TreeSitter.Query (Query, QueryCapture (..), queryCaptures)
 
 import CodeStar.RepoMap.Graph.Extract.Types (Tag (..), TagKind (..), namedChildren, wordAt)
 
+-- | File name (not full path) of the Haskell definition query.
+-- 'loadDefinitionQuery' looks for this file under @CODESTAR_QUERIES_DIR@.
 haskellDefinitionQueryFile :: FilePath
 haskellDefinitionQueryFile = "haskell-definitions.scm"
 
+-- | Run the Haskell definition query against the parse tree, collecting
+-- both definition tags (from 'captureToDefinition') and import-reference
+-- tags (from 'captureToHaskellReference').
 extractHaskellDefinitionsByQuery :: V.Vector Text -> FilePath -> Query -> Node -> IO [Tag]
 extractHaskellDefinitionsByQuery srcLines path query root = do
   captures <- queryCaptures query root
@@ -29,6 +56,10 @@ extractHaskellDefinitionsByQuery srcLines path query root = do
   refs <- concat <$> mapM (captureToHaskellReference srcLines path) captures
   pure (defs ++ refs)
 
+-- | AST-walk fallback for when the definition query cannot be compiled.
+-- Traverses the parse tree tracking whether the current node is inside a
+-- definition context (@insideDef@) and emits a 'Definition' tag for any
+-- leaf identifier at column 0 that is not a noise word.
 walkHaskellDefinitions :: V.Vector Text -> FilePath -> Node -> IO [Tag]
 walkHaskellDefinitions srcLines path = go 0 False
  where
@@ -56,6 +87,9 @@ walkHaskellDefinitions srcLines path = go 0 False
                 children <- namedChildren node (min count (fromIntegral maxChildren))
                 concat <$> mapM (go (depth + 1) insideDef') children
 
+-- | Convert a query capture to zero or more definition tags.
+-- Captures whose name is not in 'haskellAllowedCaptures' are ignored.
+-- Module names are handled specially via 'mkModuleTag'.
 captureToDefinition :: V.Vector Text -> FilePath -> QueryCapture -> IO [Tag]
 captureToDefinition srcLines path capture =
   if not (capture.captureName `Set.member` haskellAllowedCaptures)
@@ -71,6 +105,9 @@ captureToDefinition srcLines path capture =
             then mkModuleTag Definition srcLines path capture.captureNode
             else pure []
 
+-- | Convert an import-reference capture to a 'Reference' tag.
+-- Only 'haskellReferenceCaptures' (@ref.import.module@) are handled;
+-- all other captures produce an empty list.
 captureToHaskellReference :: V.Vector Text -> FilePath -> QueryCapture -> IO [Tag]
 captureToHaskellReference srcLines path capture =
   if not (capture.captureName `Set.member` haskellReferenceCaptures)
@@ -159,6 +196,9 @@ haskellDefinitionBoundaryTypes =
     , "guard"
     ]
 
+-- | Common Haskell type names that are legal identifiers but not useful
+-- definition tags — they appear pervasively as type annotations and
+-- constructor patterns, not as top-level definition heads.
 haskellNoiseNames :: Set Text
 haskellNoiseNames =
   Set.fromList
@@ -198,6 +238,11 @@ haskellReferenceCaptures =
     [ "ref.import.module"
     ]
 
+-- | The built-in Haskell definition query, compiled into the binary.
+-- This is the fallback when no external @haskell-definitions.scm@ file
+-- is available.  The query captures declaration heads (functions,
+-- signatures, type definitions, class\/instance declarations, module names)
+-- and avoids local expression identifiers.
 haskellDefinitionQueryEmbedded :: ByteString
 haskellDefinitionQueryEmbedded =
   BS.intercalate "\n"
