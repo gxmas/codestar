@@ -59,13 +59,13 @@ import CodeStar.TreeSitter (GrammarRegistry)
 -- --------------------------------------------------------------------
 
 data WorkerState = WorkerState
-  { wsTags :: !(Map FilePath [Tag])
+  { tags :: !(Map FilePath [Tag])
   -- ^ Accumulated tags per file
-  , wsRendered :: !Text
+  , renderedMap :: !Text
   -- ^ Current rendered map
-  , wsLastRebuild :: !UTCTime
+  , lastRebuild :: !UTCTime
   -- ^ When we last rebuilt the graph
-  , wsPendingFiles :: !(Set FilePath)
+  , pendingFiles :: !(Set FilePath)
   -- ^ Files changed since last rebuild
   }
 
@@ -74,10 +74,10 @@ emptyWorkerState = do
   now <- getCurrentTime
   pure
     WorkerState
-      { wsTags = Map.empty
-      , wsRendered = Text.empty
-      , wsLastRebuild = now
-      , wsPendingFiles = Set.empty
+      { tags = Map.empty
+      , renderedMap = Text.empty
+      , lastRebuild = now
+      , pendingFiles = Set.empty
       }
 
 -- --------------------------------------------------------------------
@@ -179,25 +179,25 @@ data WorkerStatus = WorkerStatus
 getCurrentMap :: RepoMapWorker -> IO Text
 getCurrentMap worker = atomically $ do
   state <- readTVar worker.rwState
-  pure state.wsRendered
+  pure state.renderedMap
 
 -- | Sample the worker's current indexing state without blocking.
 getWorkerStatus :: RepoMapWorker -> IO WorkerStatus
 getWorkerStatus worker = atomically $ do
   state <- readTVar worker.rwState
   empty <- isEmptyTQueue worker.rwQueue
-  let totalTags = sum (map length (Map.elems state.wsTags))
+  let totalTags = sum (map length (Map.elems state.tags))
   pure WorkerStatus
-    { indexedFileCount = Map.size state.wsTags
+    { indexedFileCount = Map.size state.tags
     , totalTagCount    = totalTags
-    , pendingFileCount = Set.size state.wsPendingFiles
+    , pendingFileCount = Set.size state.pendingFiles
     , queueIsEmpty     = empty
     }
 
 getIndexedFiles :: RepoMapWorker -> IO [FilePath]
 getIndexedFiles worker = do
   state <- atomically $ readTVar worker.rwState
-  pure (Map.keys state.wsTags)
+  pure (Map.keys state.tags)
 
 subscribeToUpdates :: RepoMapWorker -> IO (TChan Text)
 subscribeToUpdates worker = atomically $ dupTChan worker.rwUpdates
@@ -217,7 +217,7 @@ enqueueAll worker = do
 forceRebuild :: RepoMapWorker -> IO ()
 forceRebuild worker = do
   state <- atomically $ readTVar worker.rwState
-  let allTags = concat (Map.elems state.wsTags)
+  let allTags = concat (Map.elems state.tags)
       graph = buildSymbolGraph allTags
       scores = pageRank graph [] [] defaultWeights
       rendered = renderRepoMap allTags scores graph worker.rwConfig
@@ -225,9 +225,9 @@ forceRebuild worker = do
   atomically $ do
     modifyTVar' worker.rwState $ \s ->
       s
-        { wsRendered = rendered
-        , wsLastRebuild = now
-        , wsPendingFiles = Set.empty
+        { renderedMap = rendered
+        , lastRebuild = now
+        , pendingFiles = Set.empty
         }
     writeTChan worker.rwUpdates rendered
 
@@ -262,7 +262,7 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
   when isEmpty $ do
     hasPending <- atomically $ do
       s <- readTVar stateVar
-      pure (not (Set.null s.wsPendingFiles))
+      pure (not (Set.null s.pendingFiles))
     when hasPending rebuildGraph
     threadDelay 100000 -- 100ms idle sleep
  where
@@ -319,31 +319,31 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
   -- | Record a non-code file with empty tags so it appears as indexed.
   recordUnsupported :: FilePath -> IO ()
   recordUnsupported path = atomically $ modifyTVar' stateVar $ \s ->
-    s { wsTags = Map.insert path [] s.wsTags
-      , wsPendingFiles = Set.insert path s.wsPendingFiles
+    s { tags = Map.insert path [] s.tags
+      , pendingFiles = Set.insert path s.pendingFiles
       }
 
   -- | Remove a deleted file from the tag index.
   removeFile' :: FilePath -> IO ()
   removeFile' path = atomically $ modifyTVar' stateVar $ \s ->
-    s { wsTags = Map.delete path s.wsTags
-      , wsPendingFiles = Set.insert path s.wsPendingFiles
+    s { tags = Map.delete path s.tags
+      , pendingFiles = Set.insert path s.pendingFiles
       }
 
   -- | Write successfully extracted tags into the state.
   -- @mMtime@ is unused here but kept for symmetry with 'extractAndStore'.
   storeTags' :: FilePath -> [Tag] -> Maybe UTCTime -> IO ()
   storeTags' path tags _mMtime = atomically $ modifyTVar' stateVar $ \s ->
-    s { wsTags = Map.insert path tags s.wsTags
-      , wsPendingFiles = Set.insert path s.wsPendingFiles
+    s { tags = Map.insert path tags s.tags
+      , pendingFiles = Set.insert path s.pendingFiles
       }
 
   -- | Mark a file as failed: preserve any previously extracted tags so the
   -- file still counts as indexed; insert it into pending for the next rebuild.
   markFailed :: FilePath -> IO ()
   markFailed path = atomically $ modifyTVar' stateVar $ \s ->
-    s { wsTags = Map.insertWith (\_ old -> old) path [] s.wsTags
-      , wsPendingFiles = Set.insert path s.wsPendingFiles
+    s { tags = Map.insertWith (\_ old -> old) path [] s.tags
+      , pendingFiles = Set.insert path s.pendingFiles
       }
 
   codeExtensions = [".hs", ".py", ".js", ".ts", ".tsx", ".rs", ".go", ".c", ".cpp", ".java", ".rb", ".swift", ".kt", ".scala", ".ex", ".exs", ".lua", ".pl", ".r", ".R"]
@@ -356,13 +356,13 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
   checkShouldRebuild intervalMs = do
     now <- getCurrentTime
     state <- atomically $ readTVar stateVar
-    let elapsed = diffTimeMs now state.wsLastRebuild
-    pure (elapsed >= intervalMs && not (Set.null state.wsPendingFiles))
+    let elapsed = diffTimeMs now state.lastRebuild
+    pure (elapsed >= intervalMs && not (Set.null state.pendingFiles))
 
   rebuildGraph :: IO ()
   rebuildGraph = do
     state <- atomically $ readTVar stateVar
-    let allTags = concat (Map.elems state.wsTags)
+    let allTags = concat (Map.elems state.tags)
         graph = buildSymbolGraph allTags
         scores = pageRank graph [] [] defaultWeights
         rendered = renderRepoMap allTags scores graph renderCfg
@@ -370,9 +370,9 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
     atomically $ do
       modifyTVar' stateVar $ \s ->
         s
-          { wsRendered = rendered
-          , wsLastRebuild = now
-          , wsPendingFiles = Set.empty
+          { renderedMap = rendered
+          , lastRebuild = now
+          , pendingFiles = Set.empty
           }
       writeTChan updates rendered
 
