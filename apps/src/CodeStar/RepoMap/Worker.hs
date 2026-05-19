@@ -277,71 +277,74 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
         (1 +) <$> processBatch (remaining - 1)
 
   processFile :: FilePath -> IO ()
-  processFile path = do
-    let markFailed = atomically $ modifyTVar' stateVar $ \s ->
-          s
-            { wsTags =
-                -- Keep previously extracted tags when available; only fall back to empty tags
-                -- for first-time indexing failures so the file still counts as indexed.
-                Map.insertWith (\_ old -> old) path [] s.wsTags
-            , wsPendingFiles = Set.insert path s.wsPendingFiles
-            }
-        extractAndStore mMtime = do
-          src <- BS.readFile path
-          outcome <- extractTagsDetailed grammarReg path src
-          case outcome of
-            Extracted tags -> do
-              case mMtime of
-                Just mtime -> cache.putTags path mtime tags
-                Nothing -> pure ()
-              atomically $ modifyTVar' stateVar $ \s ->
-                s
-                  { wsTags = Map.insert path tags s.wsTags
-                  , wsPendingFiles = Set.insert path s.wsPendingFiles
-                  }
-            _ ->
-              markFailed
-    -- Skip non-code files early
-    let ext = takeExtension path
-    if ext `notElem` codeExtensions
-      then do
-        -- Still record the file but with empty tags
-        atomically $ modifyTVar' stateVar $ \s ->
-          s
-            { wsTags = Map.insert path [] s.wsTags
-            , wsPendingFiles = Set.insert path s.wsPendingFiles
-            }
-      else do
-        -- Timeout after 5 seconds per file to keep indexing responsive.
-        result <- timeout 5000000 $ try @SomeException $ do
-          exists <- doesFileExist path
-          if not exists
-            then do
-              atomically $ modifyTVar' stateVar $ \s ->
-                s
-                  { wsTags = Map.delete path s.wsTags
-                  , wsPendingFiles = Set.insert path s.wsPendingFiles
-                  }
-            else do
-              mtimeResult <- try @SomeException (getModificationTime path)
-              case mtimeResult of
-                Right mtime -> do
-                  cached <- cache.getTags path mtime
-                  case cached of
-                    Just tags ->
-                      atomically $ modifyTVar' stateVar $ \s ->
-                        s
-                          { wsTags = Map.insert path tags s.wsTags
-                          , wsPendingFiles = Set.insert path s.wsPendingFiles
-                          }
-                    Nothing -> extractAndStore (Just mtime)
-                Left _ -> extractAndStore Nothing
+  processFile path
+    | takeExtension path `notElem` codeExtensions = recordUnsupported path
+    | otherwise = do
+        -- 5-second timeout keeps the worker responsive on slow or large files.
+        result <- timeout 5000000 $ try @SomeException (processCodeFile path)
         case result of
-          Nothing -> do
-            markFailed
-          Just (Left _) -> do
-            markFailed
+          Nothing        -> markFailed path  -- timed out
+          Just (Left _)  -> markFailed path  -- exception
           Just (Right _) -> pure ()
+
+  -- | Process a file whose extension is in 'codeExtensions'.
+  processCodeFile :: FilePath -> IO ()
+  processCodeFile path = do
+    exists <- doesFileExist path
+    if not exists
+      then removeFile' path
+      else do
+        mtimeResult <- try @SomeException (getModificationTime path)
+        case mtimeResult of
+          Right mtime -> do
+            cached <- cache.getTags path mtime
+            case cached of
+              Just tags -> storeTags' path tags (Just mtime)
+              Nothing   -> extractAndStore path (Just mtime)
+          Left _ -> extractAndStore path Nothing
+
+  -- | Extract tags from @path@, cache them under @mMtime@, and store in state.
+  extractAndStore :: FilePath -> Maybe UTCTime -> IO ()
+  extractAndStore path mMtime = do
+    src <- BS.readFile path
+    outcome <- extractTagsDetailed grammarReg path src
+    case outcome of
+      Extracted tags -> do
+        case mMtime of
+          Just mtime -> cache.putTags path mtime tags
+          Nothing    -> pure ()
+        storeTags' path tags mMtime
+      _ -> markFailed path
+
+  -- | Record a non-code file with empty tags so it appears as indexed.
+  recordUnsupported :: FilePath -> IO ()
+  recordUnsupported path = atomically $ modifyTVar' stateVar $ \s ->
+    s { wsTags = Map.insert path [] s.wsTags
+      , wsPendingFiles = Set.insert path s.wsPendingFiles
+      }
+
+  -- | Remove a deleted file from the tag index.
+  removeFile' :: FilePath -> IO ()
+  removeFile' path = atomically $ modifyTVar' stateVar $ \s ->
+    s { wsTags = Map.delete path s.wsTags
+      , wsPendingFiles = Set.insert path s.wsPendingFiles
+      }
+
+  -- | Write successfully extracted tags into the state.
+  -- @mMtime@ is unused here but kept for symmetry with 'extractAndStore'.
+  storeTags' :: FilePath -> [Tag] -> Maybe UTCTime -> IO ()
+  storeTags' path tags _mMtime = atomically $ modifyTVar' stateVar $ \s ->
+    s { wsTags = Map.insert path tags s.wsTags
+      , wsPendingFiles = Set.insert path s.wsPendingFiles
+      }
+
+  -- | Mark a file as failed: preserve any previously extracted tags so the
+  -- file still counts as indexed; insert it into pending for the next rebuild.
+  markFailed :: FilePath -> IO ()
+  markFailed path = atomically $ modifyTVar' stateVar $ \s ->
+    s { wsTags = Map.insertWith (\_ old -> old) path [] s.wsTags
+      , wsPendingFiles = Set.insert path s.wsPendingFiles
+      }
 
   codeExtensions = [".hs", ".py", ".js", ".ts", ".tsx", ".rs", ".go", ".c", ".cpp", ".java", ".rb", ".swift", ".kt", ".scala", ".ex", ".exs", ".lua", ".pl", ".r", ".R"]
 
