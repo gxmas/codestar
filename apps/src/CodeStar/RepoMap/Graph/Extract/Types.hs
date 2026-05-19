@@ -1,6 +1,7 @@
 module CodeStar.RepoMap.Graph.Extract.Types
   ( TagKind (..)
   , Tag (..)
+  , ExtractionSkip (..)
   , TagExtraction (..)
   , wordAt
   , isIdentChar
@@ -17,6 +18,15 @@ import GHC.Generics (Generic)
 import TreeSitter (Node)
 import TreeSitter qualified as TS
 
+-- | Why a file was skipped without attempting tag extraction.
+data ExtractionSkip
+  = UnsupportedExtension
+  -- ^ No extractor is registered for this file extension.
+  | NoGrammarInstalled
+  -- ^ An extractor exists for the language, but the Tree-sitter grammar
+  --   library (@.so@ / @.dylib@) has not been loaded.
+  deriving stock (Eq, Show)
+
 data TagKind = Definition | Reference
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
@@ -30,11 +40,16 @@ data Tag = Tag
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | Result of attempting to extract tags from a source file.
 data TagExtraction
   = Extracted [Tag]
-  | SkippedUnsupported
-  | SkippedNoGrammar
-  | ExtractFailed
+  -- ^ Tag extraction succeeded; the list may be empty for files with no
+  --   recognisable definitions.
+  | Skipped ExtractionSkip
+  -- ^ The file was intentionally skipped — no error, no tags.
+  | ExtractFailed Text
+  -- ^ Extraction was attempted but failed. The 'Text' payload carries a
+  --   human-readable reason suitable for logging.
   deriving stock (Eq, Show)
 
 wordAt :: V.Vector Text -> Int -> Int -> Text

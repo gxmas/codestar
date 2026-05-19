@@ -47,10 +47,11 @@ import Data.Text qualified as Text
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import System.Directory (doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
 import System.FilePath ((</>))
+import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
 
 import CodeStar.RepoMap.Cache (RepoMapCache (..))
-import CodeStar.RepoMap.Graph (Tag, TagExtraction (..), buildSymbolGraph, defaultWeights, extractTagsDetailed, pageRank)
+import CodeStar.RepoMap.Graph (Tag, ExtractionSkip (..), TagExtraction (..), buildSymbolGraph, defaultWeights, extractTagsDetailed, pageRank)
 import CodeStar.RepoMap.Render (RenderConfig (..), defaultRenderConfig, renderRepoMap)
 import CodeStar.TreeSitter (GrammarRegistry)
 
@@ -314,7 +315,12 @@ workerLoop stateVar queue updates grammarReg cache renderCfg cfg = forever $ do
           Just mtime -> cache.putTags path mtime tags
           Nothing    -> pure ()
         storeTags' path tags mMtime
-      _ -> markFailed path
+      Skipped _ ->
+        -- Expected: no extractor or grammar for this file type.
+        markFailed path
+      ExtractFailed reason -> do
+        hPutStrLn stderr ("[codestar] extract failed for " <> path <> ": " <> Text.unpack reason)
+        markFailed path
 
   -- | Record a non-code file with empty tags so it appears as indexed.
   recordUnsupported :: FilePath -> IO ()

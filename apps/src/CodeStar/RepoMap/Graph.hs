@@ -3,6 +3,7 @@ module CodeStar.RepoMap.Graph
   ( -- * Tags
     Tag (..)
   , TagKind (..)
+  , ExtractionSkip (..)
   , TagExtraction (..)
 
     -- * Symbol graph
@@ -32,7 +33,8 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import CodeStar.RepoMap.Graph.Extract (extractTags, extractTagsDetailed, querySourceModeLabel)
 import CodeStar.RepoMap.Graph.Extract.Types
-  ( Tag (..)
+  ( ExtractionSkip (..)
+  , Tag (..)
   , TagExtraction (..)
   , TagKind (..)
   , isIdentChar

@@ -9,21 +9,22 @@ import Test.Hspec
 import CodeStar.RepoMap.Graph
   ( extractTagsDetailed
   , querySourceModeLabel
+  , ExtractionSkip (..)
   , TagExtraction (..)
   )
 import CodeStar.TreeSitter (GrammarRegistry (..))
 
 spec :: Spec
 spec = describe "CodeStar.RepoMap.Graph.Extract" $ do
-  it "returns SkippedUnsupported for unknown file extension" $ do
+  it "returns Skipped UnsupportedExtension for unknown file extension" $ do
     let reg = GrammarRegistry Map.empty
     result <- extractTagsDetailed reg "foo.unknown" "x"
-    result `shouldBe` SkippedUnsupported
+    result `shouldBe` Skipped UnsupportedExtension
 
-  it "returns SkippedNoGrammar when language is known but not loaded" $ do
+  it "returns Skipped NoGrammarInstalled when language is known but not loaded" $ do
     let reg = GrammarRegistry Map.empty
     result <- extractTagsDetailed reg "foo.py" "print(1)"
-    result `shouldBe` SkippedNoGrammar
+    result `shouldBe` Skipped NoGrammarInstalled
 
   it "querySourceModeLabel defaults to embedded when env unset" $ do
     withUnset "CODESTAR_QUERIES_DIR" $ do

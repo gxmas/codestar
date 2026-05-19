@@ -16,7 +16,6 @@ import Data.Word (Word32)
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
-import System.IO (hPutStrLn, stderr)
 import TreeSitter (Language, Node)
 import TreeSitter qualified as TS
 import TreeSitter.Query (newQuery)
@@ -25,7 +24,8 @@ import CodeStar.RepoMap.Graph.Extract.Haskell qualified as Haskell
 import CodeStar.RepoMap.Graph.Extract.Python qualified as Python
 import CodeStar.RepoMap.Graph.Extract.TypeScript qualified as TypeScript
 import CodeStar.RepoMap.Graph.Extract.Types
-  ( Tag (..)
+  ( ExtractionSkip (..)
+  , Tag (..)
   , TagExtraction (..)
   , TagKind (..)
   , namedChildren
@@ -46,10 +46,10 @@ extractTags registry path src = do
 extractTagsDetailed :: GrammarRegistry -> FilePath -> ByteString -> IO TagExtraction
 extractTagsDetailed registry path src =
   case languageForFile path of
-    Nothing -> pure SkippedUnsupported
+    Nothing -> pure (Skipped UnsupportedExtension)
     Just langName ->
       case lookupLanguage registry langName of
-        Nothing -> pure SkippedNoGrammar
+        Nothing -> pure (Skipped NoGrammarInstalled)
         Just lang
           | langName == "haskell" -> extractHaskellWithLang lang path src
           | langName == "python" -> extractPythonWithLang lang path src
@@ -62,11 +62,11 @@ extractGenericWithLang lang path src = do
   parser <- TS.newParser
   ok <- TS.setLanguage parser lang
   if not ok
-    then pure ExtractFailed
+    then pure (ExtractFailed "failed to set parser language")
     else do
       mTree <- TS.parseSource parser src
       case mTree of
-        Nothing -> pure ExtractFailed
+        Nothing -> pure (ExtractFailed "parser returned no syntax tree")
         Just tree -> do
           tags <- TS.rootNode tree >>= walkGenericNode srcLines path
           pure (Extracted tags)
@@ -78,25 +78,22 @@ extractHaskellWithLang lang path src = do
   parser <- TS.newParser
   ok <- TS.setLanguage parser lang
   if not ok
-    then pure ExtractFailed
+    then pure (ExtractFailed "failed to set parser language")
     else do
       mTree <- TS.parseSource parser src
       case mTree of
-        Nothing -> pure ExtractFailed
+        Nothing -> pure (ExtractFailed "parser returned no syntax tree")
         Just tree -> do
           root <- TS.rootNode tree
           case queryResult of
-            Left queryErr -> do
-              hPutStrLn stderr ("[codestar] " <> Text.unpack queryErr)
-              pure ExtractFailed
+            Left queryErr ->
+              pure (ExtractFailed queryErr)
             Right querySource -> do
               eQuery <- newQuery lang querySource.bytes
               case eQuery of
                 Left _ ->
                   if querySource.strictFailure
-                    then do
-                      hPutStrLn stderr ("[codestar] Strict query mode: invalid query for haskell-definitions.scm from " <> querySource.origin)
-                      pure ExtractFailed
+                    then pure (ExtractFailed ("strict query mode: invalid query for haskell-definitions.scm from " <> Text.pack querySource.origin))
                     else do
                       fallback <- newQuery lang Haskell.haskellDefinitionQueryEmbedded
                       case fallback of
@@ -117,25 +114,22 @@ extractTypeScriptWithLang lang path src = do
   parser <- TS.newParser
   ok <- TS.setLanguage parser lang
   if not ok
-    then pure ExtractFailed
+    then pure (ExtractFailed "failed to set parser language")
     else do
       mTree <- TS.parseSource parser src
       case mTree of
-        Nothing -> pure ExtractFailed
+        Nothing -> pure (ExtractFailed "parser returned no syntax tree")
         Just tree -> do
           root <- TS.rootNode tree
           case queryResult of
-            Left queryErr -> do
-              hPutStrLn stderr ("[codestar] " <> Text.unpack queryErr)
-              pure ExtractFailed
+            Left queryErr ->
+              pure (ExtractFailed queryErr)
             Right querySource -> do
               eQuery <- newQuery lang querySource.bytes
               case eQuery of
                 Left _ ->
                   if querySource.strictFailure
-                    then do
-                      hPutStrLn stderr ("[codestar] Strict query mode: invalid query for typescript-definitions.scm from " <> querySource.origin)
-                      pure ExtractFailed
+                    then pure (ExtractFailed ("strict query mode: invalid query for typescript-definitions.scm from " <> Text.pack querySource.origin))
                     else do
                       fallback <- newQuery lang TypeScript.typeScriptDefinitionQueryEmbedded
                       case fallback of
@@ -156,25 +150,22 @@ extractPythonWithLang lang path src = do
   parser <- TS.newParser
   ok <- TS.setLanguage parser lang
   if not ok
-    then pure ExtractFailed
+    then pure (ExtractFailed "failed to set parser language")
     else do
       mTree <- TS.parseSource parser src
       case mTree of
-        Nothing -> pure ExtractFailed
+        Nothing -> pure (ExtractFailed "parser returned no syntax tree")
         Just tree -> do
           root <- TS.rootNode tree
           case queryResult of
-            Left queryErr -> do
-              hPutStrLn stderr ("[codestar] " <> Text.unpack queryErr)
-              pure ExtractFailed
+            Left queryErr ->
+              pure (ExtractFailed queryErr)
             Right querySource -> do
               eQuery <- newQuery lang querySource.bytes
               case eQuery of
                 Left _ ->
                   if querySource.strictFailure
-                    then do
-                      hPutStrLn stderr ("[codestar] Strict query mode: invalid query for python-definitions.scm from " <> querySource.origin)
-                      pure ExtractFailed
+                    then pure (ExtractFailed ("strict query mode: invalid query for python-definitions.scm from " <> Text.pack querySource.origin))
                     else do
                       fallback <- newQuery lang Python.pythonDefinitionQueryEmbedded
                       case fallback of
