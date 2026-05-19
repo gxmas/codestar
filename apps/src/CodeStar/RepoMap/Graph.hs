@@ -124,8 +124,15 @@ pageRank graph chatFiles mentionedIdents w =
               idxFile = Map.fromList (zip [0 ..] files)
               personal = personalVector graph chatFiles mentionedIdents w files
               adj = buildAdjMatrix graph fileIdx
-              initPR = replicate n (1.0 / fromIntegral n)
-              finalPR = iterate (stepPageRank n adj personal 0.85) initPR !! 100
+              -- Damping factor d: probability of following a link rather than
+              -- jumping to a random node. 0.85 is the value from the original
+              -- Brin/Page paper and remains the standard choice.
+              dampingFactor  = 0.85 :: Double
+              -- 100 iterations converges well within floating-point precision
+              -- for repositories of any realistic size.
+              iterationCount = 100  :: Int
+              initPR  = replicate n (1.0 / fromIntegral n)
+              finalPR = iterate (stepPageRank n adj personal dampingFactor) initPR !! iterationCount
            in Map.fromList [(idxFile Map.! i, finalPR !! i) | i <- [0 .. n - 1]]
 
 personalVector ::
