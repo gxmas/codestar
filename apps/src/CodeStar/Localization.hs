@@ -1,3 +1,35 @@
+{- |
+= CodeStar.Localization — hierarchical fault localisation
+
+Given a bug description and a repository overview, this module narrows the
+problem down from the whole codebase to specific patch candidates through
+a sequence of LLM calls.
+
+== Pipeline
+
+@
+  ObjectiveSpec + repoCtx
+       │
+       ▼  Step 1: File localisation
+  [LocalizedFile]           — which files likely contain the bug?
+       │
+       ▼  Step 2: Function localisation
+  [LocalizedFunction]       — which functions in those files?
+       │
+       ▼  Step 4: Patch generation
+  [PatchCandidate]          — concrete old→new code replacements
+       │
+       ▼
+  LocalizationResult
+@
+
+Each step is a __single non-streaming LLM call__ ('singleCall') with
+temperature 0 for determinism.  The output is parsed as structured text
+rather than JSON to keep the prompts simple and model-agnostic.
+
+This module is used for the automated debugging / issue-resolution workflow
+and is separate from the main agent loop, which handles interactive tasks.
+-}
 module CodeStar.Localization
   ( -- * Results
     LocalizationResult (..)
@@ -51,10 +83,11 @@ data PatchCandidate = PatchCandidate
   }
   deriving stock (Eq, Show)
 
+-- | The complete result of the localisation pipeline.
 data LocalizationResult = LocalizationResult
-  { lrFiles :: ![LocalizedFile]
-  , lrFunctions :: ![LocalizedFunction]
-  , lrPatches :: ![PatchCandidate]
+  { lrFiles     :: ![LocalizedFile]     -- ^ Files ranked by suspicion.
+  , lrFunctions :: ![LocalizedFunction] -- ^ Suspicious functions within those files.
+  , lrPatches   :: ![PatchCandidate]    -- ^ Candidate fixes ready for application.
   }
   deriving stock (Eq, Show)
 

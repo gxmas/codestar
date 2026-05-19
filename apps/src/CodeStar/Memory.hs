@@ -1,3 +1,33 @@
+{- |
+= CodeStar.Memory — persistent cross-session agent memory
+
+The agent can remember things across sessions: coding conventions, working
+approaches, known pitfalls, and user preferences.  This module provides the
+store for those memories.
+
+== Two-stage workflow
+
+  1. __Propose__: the agent (or the user, via CLI) adds a 'MemoryCandidate'
+     to a pending list.  Candidates are held in @\<root\>\/candidates.json@.
+  2. __Confirm__: the user reviews and confirms a candidate, which promotes
+     it to a 'MemoryEntry' stored in @\<root\>\/entries\/\<id\>.json@.
+
+This two-stage design keeps the agent from polluting permanent memory with
+every transient observation — human review acts as a quality gate.
+
+== Categories
+
+'MemoryCategory' classifies what kind of knowledge an entry represents:
+conventions, successful approaches, pitfalls, environment setup notes, or
+user preferences.  The system prompt assembly in "Context" can filter or
+prioritise by category.
+
+== Storage format
+
+Each confirmed entry is a separate JSON file named after its stable ID
+(derived from the category and a content hash).  This makes it easy to
+inspect, edit, or delete individual memories with standard tools.
+-}
 module CodeStar.Memory
   ( -- * Categories
     MemoryCategory (..)
@@ -75,15 +105,21 @@ data MemoryCandidate = MemoryCandidate
 -- Store
 -- --------------------------------------------------------------------
 
+-- | Filesystem-backed memory store, accessed through a record of functions.
 data MemoryStore = MemoryStore
-  { load :: IO [MemoryEntry]
-  , save :: MemoryEntry -> IO ()
-  , delete :: Text -> IO ()
-  -- ^ delete by entry ID
+  { load    :: IO [MemoryEntry]
+  -- ^ Load all confirmed entries from disk.
+  , save    :: MemoryEntry -> IO ()
+  -- ^ Write a confirmed entry to @entries\/\<id\>.json@.
+  , delete  :: Text -> IO ()
+  -- ^ Delete a confirmed entry by its ID.
   , propose :: MemoryCandidate -> IO ()
+  -- ^ Append a candidate to the pending list for user review.
   , pending :: IO [MemoryCandidate]
+  -- ^ List all pending (unconfirmed) candidates.
   , confirm :: Text -> IO ()
-  -- ^ confirm by category+content hash
+  -- ^ Promote a pending candidate (identified by content hash) to a
+  --   confirmed entry, removing it from the pending list.
   }
 
 {- | Create a filesystem-backed memory store.

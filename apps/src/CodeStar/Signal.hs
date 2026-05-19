@@ -1,3 +1,36 @@
+{- |
+= CodeStar.Signal — control signal assessment and loop detection
+
+This module answers the question: __given what just happened, what should
+the agent do next?__
+
+== From outcome to signal
+
+Each 'StepOutcome' produced by the agent loop is converted to a
+'ControlSignal' by mapping its 'FailureClass' to an action:
+
+@
+  StepSuccess        → Continue
+  Transient failure  → Continue   (retry silently)
+  Validation failure → NeedsInput (agent must fix its inputs)
+  Precondition fail  → NeedsInput (agent must establish required state)
+  Execution failure  → NeedsInput (agent must interpret result and replan)
+  Policy violation   → NeedsInput (pause for user approval)
+@
+
+== Loop detection
+
+'assessWithHistory' tracks the recent sequence of outcomes.  If the last
+3 or more consecutive outcomes were all failures (regardless of class), the
+signal is upgraded to 'Blocked' — the agent is stuck in a loop and should
+stop rather than keep burning tokens.
+
+== Error classification
+
+'classifyLlmError' and 'classifyToolError' map provider-specific error
+types to the shared 'FailureClass' taxonomy, so the signal logic stays
+decoupled from provider details.
+-}
 module CodeStar.Signal
   ( -- * Primary assessment
     assessControlSignal
@@ -73,6 +106,7 @@ countConsecutiveFailures = length . takeWhile isFailure . reverse
 -- Error classification
 -- --------------------------------------------------------------------
 
+-- | Map an LLM client error to the shared 'FailureClass' taxonomy.
 classifyLlmError :: LlmError -> FailureClass
 classifyLlmError = \case
   RateLimited _ -> Transient
@@ -83,6 +117,7 @@ classifyLlmError = \case
   InvalidRequest _ -> Validation
   ProviderError _ -> Execution
 
+-- | Map a tool registry error to the shared 'FailureClass' taxonomy.
 classifyToolError :: ToolError -> FailureClass
 classifyToolError = \case
   ToolNotFound _ -> Validation

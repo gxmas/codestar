@@ -1,3 +1,43 @@
+{- |
+= CodeStar.Config — configuration facade
+
+This module is the __single import__ that gives the rest of the codebase
+access to all configuration types and loading logic.  It re-exports from
+the sub-modules without exposing the internal split:
+
+@
+  Config.Types    — concrete record types (Config, ModelEntry, etc.)
+  Config.Defaults — default values for each section
+  Config.Load     — TOML file loading and environment-variable overlay
+  Config.Validate — validation and resolution of partial config
+@
+
+== Config hierarchy
+
+The configuration is loaded in layers and merged:
+
+  1. __Compiled defaults__ ('Config.Defaults')
+  2. __Global TOML__ (@~\/.codestar\/config.toml@)
+  3. __Project TOML__ (@.codestar\/config.toml@ in the workspace)
+  4. __Environment variables__ (e.g. @ANTHROPIC_API_KEY@)
+  5. __CLI flags__ (@--model@, @--workspace@, …)
+
+Later layers override earlier ones.  The result is a fully-resolved 'Config'.
+
+== Key sections
+
+  * 'ModelEntry' — one LLM model with provider, key, and parameter overrides.
+  * 'ServerSection' — port, auth mode, host binding.
+  * 'TelemetrySection' — backend selection and OTel endpoint.
+  * 'BudgetSection' — per-session and daily token limits.
+  * 'McpEndpoint' — external MCP server connections.
+
+== Partial vs. resolved config
+
+'PartialConfig' (and its section variants) use 'Maybe' for every field,
+allowing safe merging of config layers.  'resolve' validates a merged
+partial config and produces a concrete 'Config' or a list of 'ConfigError'.
+-}
 module CodeStar.Config
   ( -- * Config (resolved)
     Config (..)

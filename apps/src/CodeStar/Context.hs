@@ -1,3 +1,33 @@
+{- |
+= CodeStar.Context — system prompt and context window assembly
+
+Every LLM request needs a context window: the system prompt (instructions,
+tool docs, repo map, memory) plus the conversation history.  This module
+assembles the __stable__ part — the content that does not change from turn
+to turn — and computes how many tokens are left for the conversation history.
+
+== What goes where
+
+@
+  System prompt = base instructions + repo map section + memory section
+  Prepended messages = step-scoped files (from plan Uses: fields)
+  Conversation history = caller's responsibility (AgentLoop)
+@
+
+The repo map and memory are injected into the system prompt rather than the
+conversation so they benefit from Anthropic's prompt cache — these large
+blocks are identical across turns and should be served from cache.
+
+== Token budget
+
+'computeBudget' subtracts reserved space for the repo map, memory, compaction
+overhead, and the model's response from the total context window, then splits
+the remaining tokens 75\/25 between history and step-scoped files.
+
+Students: notice how 'assemble' takes a purely functional config and IO paths
+for file loading, but returns a pure 'ContextParts'.  The IO is confined to
+the file reads; the assembly logic is deterministic.
+-}
 module CodeStar.Context
   ( -- * Context assembly
     ContextConfig (..)
@@ -51,9 +81,10 @@ defaultContextConfig =
 -- Token budget
 -- --------------------------------------------------------------------
 
+-- | How many tokens are available for each dynamic portion of the context.
 data TokenBudget = TokenBudget
-  { budgetForHistory :: !Int
-  , budgetForFiles :: !Int
+  { budgetForHistory :: !Int -- ^ Tokens available for conversation history.
+  , budgetForFiles   :: !Int -- ^ Tokens available for step-scoped file content.
   }
   deriving stock (Eq, Show)
 
@@ -77,12 +108,12 @@ computeBudget cfg systemPromptTokens =
 -- Context parts
 -- --------------------------------------------------------------------
 
+-- | The assembled stable context, ready to be prepended to an LLM request.
 data ContextParts = ContextParts
-  { systemPrompt :: !Text
-  , repoMapSection :: !Text
-  , memorySection :: !Text
-  , stepFiles :: !Text
-  -- ^ step-scoped files (Uses: from plan)
+  { systemPrompt   :: !Text -- ^ Full system prompt: instructions + repo map + memory.
+  , repoMapSection :: !Text -- ^ The repo map block (also embedded in systemPrompt).
+  , memorySection  :: !Text -- ^ The memory block (also embedded in systemPrompt).
+  , stepFiles      :: !Text -- ^ Step-scoped file content, sent as a prepended user message.
   }
   deriving stock (Show)
 

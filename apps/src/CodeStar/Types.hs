@@ -1,3 +1,34 @@
+{- |
+= CodeStar.Types — shared domain types
+
+This module is the __vocabulary__ of the agent system.  Every other module
+imports from here; nothing here imports from the rest of codestar.  Keeping
+all shared types in one place avoids import cycles and makes it easy to see
+the complete data model at a glance.
+
+== Key concepts for students
+
+  * __ControlSignal__: the value the agent loop produces at the end of each
+    turn.  'Continue' means keep going; 'NeedsInput' means pause and wait
+    for the user; 'Blocked' means give up because a loop was detected; 'Done'
+    means the task is finished with verifiable evidence.
+
+  * __Evidence__: proof that the agent's work is correct — did the tests
+    pass? did the build succeed? which files were verified?  The agent must
+    produce evidence before emitting 'Done'.
+
+  * __FailureClass__: a taxonomy that maps tool and LLM errors to
+    actionable signals.  'Transient' errors are retried silently; 'Policy'
+    errors pause for user approval; 'Validation' errors ask the agent to
+    fix its own output.
+
+  * __StepOutcome__: what happened on a single agent step (tool call +
+    observation).  A sequence of 'StepOutcome' values is the raw material
+    that 'Signal.assessWithHistory' converts to a 'ControlSignal'.
+
+  * __PlanningMode__: whether the agent uses no plan, a flat list plan, or
+    a DAG plan to structure its work.
+-}
 module CodeStar.Types
   ( -- * Domain Identifiers
     SessionId (..)
@@ -54,6 +85,9 @@ import GHC.Generics (Generic)
 -- Domain Identifiers
 -- --------------------------------------------------------------------
 
+-- | Identifies a single agent session (one task from start to finish).
+-- Newtypes for all domain IDs prevent accidental mix-ups between e.g.
+-- a 'SessionId' and a 'UserId' at the type level.
 newtype SessionId = SessionId Text
   deriving stock (Show)
   deriving newtype (Eq, Ord, Hashable, FromJSON, ToJSON)
@@ -96,12 +130,15 @@ instance FromJSON TaskType where
 -- Failure Taxonomy
 -- --------------------------------------------------------------------
 
+-- | Why a tool call or LLM call failed.  'Signal.classifyLlmError' and
+-- 'Signal.classifyToolError' map provider errors to these classes, which
+-- in turn determine the resulting 'ControlSignal'.
 data FailureClass
-  = Transient
-  | Validation
-  | Precondition
-  | Execution
-  | Policy
+  = Transient    -- ^ Rate limit or network blip; retry silently.
+  | Validation   -- ^ Bad inputs; the agent must fix its own output.
+  | Precondition -- ^ Required state missing; the agent must establish it.
+  | Execution    -- ^ The tool ran but failed; the agent must replan.
+  | Policy       -- ^ Permission required; pause for user approval.
   deriving stock (Eq, Ord, Show, Enum, Bounded, Generic)
 
 instance ToJSON FailureClass where
@@ -141,11 +178,13 @@ instance FromJSON CheckResult where
     "notChecked" -> pure NotChecked
     other -> fail $ "Unknown CheckResult: " <> show other
 
+-- | Verifiable proof that the agent's work is correct.
+-- The agent loop populates this before emitting 'Done'.
 data Evidence = Evidence
-  { testsPass :: CheckResult
-  , buildSucceeds :: CheckResult
-  , filesVerified :: [FilePath]
-  , regressions :: [Text]
+  { testsPass      :: CheckResult  -- ^ Did the test suite pass?
+  , buildSucceeds  :: CheckResult  -- ^ Did the build succeed?
+  , filesVerified  :: [FilePath]   -- ^ Files whose syntax was verified.
+  , regressions    :: [Text]       -- ^ Any regressions detected.
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -154,11 +193,12 @@ data Evidence = Evidence
 -- Control Signals
 -- --------------------------------------------------------------------
 
+-- | The outcome of one agent turn, deciding what happens next.
 data ControlSignal
-  = Continue
-  | NeedsInput Text
-  | Blocked Text
-  | Done Evidence
+  = Continue             -- ^ Keep running; more tool calls may be needed.
+  | NeedsInput Text      -- ^ Pause the loop and surface a question to the user.
+  | Blocked Text         -- ^ Abort: the agent is stuck in a loop.
+  | Done Evidence        -- ^ Task complete; evidence justifies the claim.
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON ControlSignal where
@@ -178,6 +218,8 @@ instance FromJSON ControlSignal where
       "done" -> Done <$> o .: "evidence"
       other -> fail $ "Unknown ControlSignal: " <> show other
 
+-- | Numeric severity for signal comparison: higher = more severe.
+-- Used by 'worstSignal' to pick the most severe signal from a list.
 controlSignalSeverity :: ControlSignal -> Int
 controlSignalSeverity = \case
   Done{} -> 0

@@ -1,3 +1,27 @@
+{- |
+= CodeStar.Permissions — tool invocation permission store
+
+Before executing a 'SideEffect' or 'LocalWrite' tool, the agent loop
+checks whether the user has already approved it.  This module manages
+that approval state across three layers with different persistence scopes:
+
+@
+  Session layer  — in-memory IORef, lost when the agent stops
+  Project layer  — .codestar/settings.json in the workspace root
+  Global layer   — ~/.codestar/settings.json in the user's home dir
+@
+
+'check' returns 'True' if a command string appears in __any__ of the three
+layers.  This means a command granted globally does not need re-approving
+per project, and a command granted for a session does not need to be
+persisted to disk.
+
+'grant' and 'revoke' modify the chosen layer and, for 'Project' and
+'Global', persist the change to disk so it survives process restarts.
+
+The permission key is a free-form text string — typically the tool name
+plus an optional argument pattern (e.g. @"bash"@, @"bash:npm test"@).
+-}
 module CodeStar.Permissions
   ( -- * Scope
     PermissionScope (..)
@@ -54,10 +78,14 @@ newtype PersistedPermissions = PersistedPermissions
 -- Store
 -- --------------------------------------------------------------------
 
+-- | A three-layer permission store implemented as a record of functions.
 data PermissionStore = PermissionStore
-  { checkPerm :: Text -> IO Bool
-  , grantPerm :: Text -> PermissionScope -> IO ()
+  { checkPerm  :: Text -> IO Bool
+  -- ^ Return 'True' if the command is allowed in any layer.
+  , grantPerm  :: Text -> PermissionScope -> IO ()
+  -- ^ Add the command to the specified layer (persisting if Project\/Global).
   , revokePerm :: Text -> PermissionScope -> IO ()
+  -- ^ Remove the command from the specified layer.
   }
 
 {- | Create a three-layer permission store.

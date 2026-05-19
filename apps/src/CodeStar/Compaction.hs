@@ -1,3 +1,35 @@
+{- |
+= CodeStar.Compaction — conversation history compaction
+
+LLM context windows are finite.  As the agent works through a long task,
+the conversation history grows and eventually approaches the limit.
+Compaction solves this by replacing the entire history with a one-shot LLM
+summary, freeing space for future turns.
+
+== How it works
+
+1. 'shouldCompact' checks whether the history has grown past the configured
+   fraction (default 85%) of the context window.
+2. When triggered, 'compact' builds a summary prompt from the current history
+   and durable state ('CompactionState'), calls the LLM, and replaces the
+   history with a single @System@ message containing the summary.
+3. After compaction the agent continues from the summary — it knows what it
+   did but not the exact sequence of messages.
+
+== CompactionState
+
+Some information must survive compaction and be injected back into the
+context: the repo map, the todo list, memory file paths, and the original
+task description.  'CompactionState' holds these durable items.  The agent
+loop is responsible for keeping 'CompactionState' up to date as it works.
+
+== Trigger
+
+Compaction is triggered automatically when 'shouldCompact' returns 'True',
+or manually when the user sends @\/compact@ in the REPL.  The @\/compact@
+command can optionally carry an instruction string that is included in the
+summary prompt (e.g. "focus on the authentication changes").
+-}
 module CodeStar.Compaction
   ( -- * State
     CompactionState (..)
@@ -41,15 +73,13 @@ import CodeStar.RepoMap.Render (estimateTokens)
 {- | Durable items that must survive compaction and be injected back
 into the context after the summary is inserted.
 -}
+-- | Durable items that must survive compaction and be injected back into
+-- the context after the summary is inserted.
 data CompactionState = CompactionState
-  { csRepoMap :: !Text
-  -- ^ last rendered repo map
-  , csTodoList :: ![Text]
-  -- ^ current todo items (descriptions)
-  , csMemory :: ![Text]
-  -- ^ memory file paths to reload
-  , csTask :: !Text
-  -- ^ original task description
+  { csRepoMap  :: !Text   -- ^ Last rendered repo map (re-injected into compacted context).
+  , csTodoList :: ![Text] -- ^ Current todo-list items (descriptions, not IDs).
+  , csMemory   :: ![Text] -- ^ Memory file paths to re-read after compaction.
+  , csTask     :: !Text   -- ^ Original task description; anchors the summary.
   }
   deriving stock (Eq, Show)
 

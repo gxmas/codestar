@@ -1,3 +1,47 @@
+{- |
+= CodeStar.Telemetry — observability (traces, metrics, logs)
+
+This module provides the __observability layer__ for the agent system.
+Every significant event — tool calls, LLM turns, compactions, session
+lifecycle events — is recorded here so operators can understand what the
+system is doing and diagnose problems.
+
+== Three backends
+
+  * __'noOpRecorder'__: silently discards all events.  Used in tests and
+    when telemetry is disabled (@telemetry.mode = off@).
+
+  * __'jsonRecorder'__: serialises each 'AgentEvent' as a JSON line to
+    stderr.  Useful for local development and simple log-based pipelines.
+
+  * __'otlpRecorder'__: full OpenTelemetry integration:
+    - __Traces__ via OTLP\/HTTP (BatchSpanProcessor) — latency and causality.
+    - __Metrics__ via Prometheus pull endpoint — counters, histograms, gauges.
+    - __Logs__ via OTLP\/HTTP (SimpleLogRecordProcessor) — structured events.
+
+== Design: record-of-functions
+
+'TelemetryRecorder' is a record-of-functions, following the same pattern
+as 'LlmClientDict' and 'ToolHandlerDict'.  This lets the rest of the
+codebase work against an abstract recorder without knowing which backend
+is in use, and makes it trivial to build test recorders.
+
+== AgentEvent taxonomy
+
+'AgentEvent' is a sum type covering every observable event in the system.
+Each constructor is mapped to specific OTel instruments in 'recordEventOtlp':
+counters for event counts, histograms for durations and token sizes, gauges
+for session-level aggregates.  The constructor names follow the pattern
+@Ev\<Subsystem\>\<Action\>@.
+
+== Span lifecycle
+
+'startSpan' creates an OTel span __and__ attaches it to the ambient context
+via 'attach', so that spans started from child threads (e.g. the agent
+runner) are correctly parented to the connection span.  'endSpan' detaches
+and ends the span.  'withSpan' is the safe helper that guarantees 'endSpan'
+even under async exceptions using 'mask'.
+-}
 module CodeStar.Telemetry
   ( -- * Agent Events
     AgentEvent (..)
@@ -137,6 +181,7 @@ import CodeStar.Types (ControlSignal (..), TaskType (..))
 -- Config and lifecycle
 -- --------------------------------------------------------------------
 
+-- | Top-level telemetry configuration, chosen from the TOML config.
 data TelemetryConfig = NoOpConfig | OpenTelemetryConfig OtelSettings
 
 data OtelSettings = OtelSettings
@@ -351,14 +396,24 @@ data SpanHandle = SpanHandle SomeSpan Token
 -- Recorder
 -- --------------------------------------------------------------------
 
+-- | The observability interface passed through the system as a record of
+-- functions.  All call sites use this type; the backend is chosen once at
+-- startup and never changes.
 data TelemetryRecorder = TelemetryRecorder
   { recordEvent        :: AgentEvent -> IO ()
+  -- ^ Emit a structured event (counter / histogram / log depending on type).
   , startSpan          :: Text -> [(Text, AttributeValue)] -> IO SpanHandle
+  -- ^ Begin a new OTel span and push it onto the context stack.
   , endSpan            :: SpanHandle -> IO ()
+  -- ^ Pop the span from the context stack and mark it finished.
   , setSpanAttr        :: SpanHandle -> Text -> Text -> IO ()
+  -- ^ Attach a string attribute to a live span.
   , setSpanAttrTyped   :: SpanHandle -> Text -> AttributeValue -> IO ()
+  -- ^ Attach a typed attribute to a live span.
   , setSpanError       :: SpanHandle -> Text -> IO ()
-  , adjustSessionCount :: Int -> IO ()   -- +1 on create, -1 on terminate
+  -- ^ Mark a span as errored with a message (sets OTel status = Error).
+  , adjustSessionCount :: Int -> IO ()
+  -- ^ Increment (+1) or decrement (-1) the active-sessions gauge.
   }
 
 -- --------------------------------------------------------------------
@@ -828,6 +883,7 @@ codestarScope = InstrumentationScope
   , scopeAttributes = Nothing
   }
 
+-- | Short string label for a 'ControlSignal', used as an OTel attribute value.
 signalLabel :: ControlSignal -> Text
 signalLabel Continue       = "continue"
 signalLabel (NeedsInput _) = "needs_input"
