@@ -1,3 +1,37 @@
+{- |
+= CodeStar.Tools.Registry — tool registration and dispatch
+
+The tool registry is the __table of contents__ for everything the agent
+can do.  The agent loop queries it to get tool schemas (sent to the LLM
+so it knows what tools are available) and calls it to execute tool
+invocations that the LLM requests.
+
+== Risk tiers
+
+Each tool declares a 'RiskTier' that determines whether user approval is
+required before execution:
+
+  * 'ReadOnly' — safe to run without confirmation (file reads, searches).
+  * 'LocalWrite' — modifies the local filesystem (writes, edits).
+  * 'SideEffect' — has external effects (shell commands, network calls).
+
+The permission system in "CodeStar.Permissions" uses risk tiers to decide
+whether to ask the user before dispatching.
+
+== Design: record-of-functions
+
+'ToolHandlerDict' is a record-of-functions so that all tools share the
+same type and can be stored in a homogeneous @Map@.  The alternative —
+a sum type — would require modifying a central dispatch function every
+time a new tool is added.
+
+== Adding a new tool
+
+1. Write a module in @CodeStar/Tools/@ exporting a @ToolHandlerDict@.
+2. Call 'register' with that dict in "CodeStar.AgentSetup.buildRegistry".
+3. The tool is automatically included in the schema sent to the LLM and in
+   the dispatch table used by 'CodeStar.AgentLoop'.
+-}
 module CodeStar.Tools.Registry
   ( -- * Tool Definition
     RiskTier (..)
@@ -41,14 +75,17 @@ import CodeStar.LLM.Base (ToolName (..))
 -- Tool Definition
 -- --------------------------------------------------------------------
 
+-- | How dangerous a tool invocation is.  Used by the permission system to
+-- decide whether to pause and ask the user before executing the tool.
 data RiskTier = ReadOnly | LocalWrite | SideEffect
   deriving stock (Eq, Ord, Show, Enum, Bounded, Generic)
 
+-- | Metadata about a tool, sent to the LLM as part of the tool-use prompt.
 data ToolDefinition = ToolDefinition
-  { name :: ToolName
-  , description :: Text
-  , parameters :: Schema
-  , riskTier :: RiskTier
+  { name        :: ToolName -- ^ The name the LLM uses to invoke this tool.
+  , description :: Text     -- ^ Natural-language description for the LLM.
+  , parameters  :: Schema   -- ^ JSON Schema describing the tool's arguments.
+  , riskTier    :: RiskTier -- ^ Risk level for permission checking.
   }
   deriving stock (Show, Generic)
 

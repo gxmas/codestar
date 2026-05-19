@@ -1,3 +1,26 @@
+{- |
+= Platform.Auth.Jwks — JWKS key cache
+
+A JSON Web Key Set (JWKS) is a JSON document published by an identity
+provider that lists the public keys used to sign JWTs.  Clients fetch this
+document and use the keys to verify incoming tokens.
+
+This module provides a __caching layer__ around JWKS fetching so that:
+
+  * Key lookups are fast (in-memory, no HTTP round trip).
+  * The cache is refreshed when the TTL expires so key rotations are
+    picked up automatically without restarting the server.
+  * If a refresh fails, the stale keys are served rather than failing all
+    authentication — a graceful degradation strategy.
+  * Concurrent refresh requests are serialised by a mutex (@MVar@) so only
+    one HTTP call is in flight at a time.
+
+Three key sources are supported:
+
+  * @JwksUri@ — fetch from an HTTPS endpoint (e.g. Keycloak, Auth0).
+  * @JwksInline@ — a literal JSON JWKS string in the config.
+  * @JwksHmacSecret@ — a shared secret for HS256 tokens (single-server use).
+-}
 module CodeStar.Platform.Auth.Jwks
   ( JwksCache
   , Jwk (..)
@@ -24,9 +47,11 @@ import Network.HTTP.Client (Manager, httpLbs, parseRequest, responseBody)
 
 import CodeStar.Config.Types (JwksSource (..))
 
+-- | A single JSON Web Key.  Only RSA and HMAC keys are supported;
+-- EC and other key types are silently skipped during parsing.
 data Jwk
-  = RsaKey !Text !RSA.PublicKey
-  | HmacKey !ByteString
+  = RsaKey !Text !RSA.PublicKey -- ^ RSA public key with its key ID (@kid@).
+  | HmacKey !ByteString         -- ^ HMAC shared secret (for HS256 tokens).
   deriving stock (Show)
 
 data JwksCache = JwksCache
@@ -37,6 +62,9 @@ data JwksCache = JwksCache
   , httpMgr   :: !Manager
   }
 
+-- | Create a new JWKS cache.
+-- @mgr@ is an HTTPS connection manager; @src@ is the key source;
+-- @ttl@ is the cache TTL in seconds.
 newJwksCache :: Manager -> JwksSource -> Int -> IO JwksCache
 newJwksCache mgr src ttl = do
   ref <- newIORef Nothing
@@ -49,6 +77,9 @@ newJwksCache mgr src ttl = do
     , httpMgr   = mgr
     }
 
+-- | Return the current set of keys, refreshing from the source if the
+-- cache has expired.  Never blocks the caller for longer than one HTTPS
+-- round trip; stale keys are served if the refresh fails.
 getKeys :: JwksCache -> IO [Jwk]
 getKeys cache = do
   cached <- readIORef cache.cacheRef

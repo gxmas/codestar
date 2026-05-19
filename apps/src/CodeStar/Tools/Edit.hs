@@ -1,3 +1,16 @@
+{- |
+= Tools.Edit — exact-string file edit tool
+
+Exposes the @edit_file@ tool that replaces an exact string match in an
+existing file.  The agent must have read the file first (enforced by the
+'ReadTracker') so it has seen the current content before making a change.
+
+The tool requires that the search string is __unique__ within the file to
+prevent accidental multi-site edits.  If the string appears more than once,
+the tool returns an error asking the agent to provide more context.
+
+'replaceFirst' is the core replacement function, exposed for testing.
+-}
 module CodeStar.Tools.Edit
   ( editToolHandler
 

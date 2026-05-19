@@ -1,3 +1,28 @@
+{- |
+= Platform.CostTracker — token usage and budget enforcement
+
+Tracks the number of tokens consumed per session and per user (daily),
+and enforces configurable budget limits to prevent runaway costs.
+
+== Design
+
+'CostTracker' is a record-of-functions backed by an in-memory 'IORef'.
+All state updates are done with 'atomicModifyIORef'' to avoid races when
+multiple sessions update the tracker concurrently.
+
+== Cost model
+
+Token costs are estimated using hard-coded per-million-token rates for
+known model families.  These are rough heuristics — the actual cost
+depends on pricing tiers, discounts, and prompt caching.  The estimates
+are useful for soft budget warnings, not billing.
+
+== Budget enforcement
+
+When 'record' detects that a session or daily limit would be exceeded, it
+returns 'BudgetExhausted' without updating the counts.  The agent loop
+treats this as a terminal error and stops the session.
+-}
 module CodeStar.Platform.CostTracker
   ( -- * Tracker
     CostTracker (..)
@@ -35,6 +60,8 @@ tokenCostUsd modelName
   | "gpt-4" `Text.isPrefixOf` modelName = (10.0, 30.0)
   | otherwise = (1.0, 3.0)
 
+-- | Estimate the cost in USD for a single API call.
+-- Uses hard-coded per-million-token rates keyed by model name prefix.
 estimateCost :: Text -> Word64 -> Word64 -> Double
 estimateCost model inputTok outputTok =
   let (inRate, outRate) = tokenCostUsd model
@@ -75,11 +102,19 @@ data RecordResult
 -- Tracker
 -- --------------------------------------------------------------------
 
+-- | A token-usage tracker, implemented as a record of functions over a
+-- shared in-memory state.  Thread-safe via 'atomicModifyIORef''.
 data CostTracker = CostTracker
-  { recordTokens :: SessionId -> UserId -> Text -> Word64 -> Word64 -> IO RecordResult
-  , sessionCost :: SessionId -> IO (Word64, Word64, Double)
+  { recordTokens    :: SessionId -> UserId -> Text -> Word64 -> Word64 -> IO RecordResult
+  -- ^ Record token usage for a turn.  Returns 'BudgetExhausted' if either
+  --   the session or daily limit would be exceeded; does not update state
+  --   in that case.
+  , sessionCost     :: SessionId -> IO (Word64, Word64, Double)
+  -- ^ Return @(inputTokens, outputTokens, estimatedCostUsd)@ for a session.
   , userDailyTokens :: UserId -> IO Word64
-  , clearSession :: SessionId -> IO ()
+  -- ^ Return the total tokens consumed by a user today.
+  , clearSession    :: SessionId -> IO ()
+  -- ^ Remove all session cost data (called when a session is destroyed).
   }
 
 -- | Create a new in-memory cost tracker with optional budget limits.

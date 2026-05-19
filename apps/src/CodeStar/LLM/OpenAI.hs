@@ -1,3 +1,24 @@
+{- |
+= CodeStar.LLM.OpenAI — OpenAI-compatible adapter
+
+Adapts the OpenAI Chat Completions API to the provider-agnostic
+'LlmClientDict'.  The same adapter works for:
+
+  * __OpenAI__ via 'newOpenAIClient' (@api.openai.com@)
+  * __Any OpenAI-compatible endpoint__ via 'newCompatibleClient' — useful
+    for local servers (Ollama, LM Studio, vLLM) and hosted alternatives.
+
+== Cache markers
+
+OpenAI has no per-block cache-control directive, so 'cacheMarkerText'
+sentinels are silently dropped when translating messages.  This means
+prompt caching is a no-op for OpenAI-backed sessions.
+
+== Limitations
+
+Streaming does not populate usage statistics in the current implementation;
+'TokenCount' fields are zero for streamed responses.
+-}
 module CodeStar.LLM.OpenAI
   ( newOpenAIClient
   , newCompatibleClient
@@ -15,10 +36,13 @@ import OpenAI.Types qualified as OT
 
 import CodeStar.LLM.Base
 
+-- | Create a client targeting the standard OpenAI API endpoint.
 newOpenAIClient :: Text -> Text -> IO LlmClientDict
 newOpenAIClient apiKey modelId =
   newCompatibleClient apiKey modelId "https://api.openai.com"
 
+-- | Create a client for any OpenAI-compatible endpoint.
+-- @baseUrl@ is the server root, e.g. @\"http://localhost:11434\"@.
 newCompatibleClient :: Text -> Text -> Text -> IO LlmClientDict
 newCompatibleClient apiKey modelId baseUrl = do
   client <-

@@ -1,3 +1,16 @@
+{- |
+= Tools.TodoList — in-session task tracking tool
+
+Exposes the @todo_*@ family of tools (@todo_write@, @todo_read@) that
+let the agent maintain a structured list of sub-tasks for a complex request.
+
+The 'TodoStore' is an in-memory store scoped to one agent session.  It is
+initialised empty at session start and does not persist between sessions.
+
+Giving the agent a todo list improves reliability on multi-step tasks: the
+agent can check off completed items and keep track of what remains, rather
+than relying on the conversation history alone.
+-}
 module CodeStar.Tools.TodoList
   ( todoListHandlers
   , TodoStore

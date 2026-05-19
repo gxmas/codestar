@@ -1,3 +1,15 @@
+{- |
+= Tools.Shell — shell command execution tool
+
+Exposes the @bash@ tool that lets the agent run arbitrary shell commands
+in the workspace.  Commands are executed via the 'Sandbox' abstraction —
+either directly on the host (@noSandbox@) or inside a Docker container
+(@dockerSandbox@) depending on configuration.
+
+This is a 'SideEffect' risk-tier tool: the permission system asks the
+user for approval before executing unless the user has granted blanket
+shell approval.
+-}
 module CodeStar.Tools.Shell
   ( shellToolHandler
   ) where

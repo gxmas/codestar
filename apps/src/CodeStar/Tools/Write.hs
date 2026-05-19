@@ -1,3 +1,13 @@
+{- |
+= Tools.Write — file write tool
+
+Exposes the @write_file@ tool that creates or overwrites a file with new
+content.  Unlike the edit tool, write does not require the file to have
+been read first — it is intended for creating new files or replacing
+files wholesale.
+
+This is a 'LocalWrite' risk-tier tool.
+-}
 module CodeStar.Tools.Write
   ( writeToolHandler
   ) where

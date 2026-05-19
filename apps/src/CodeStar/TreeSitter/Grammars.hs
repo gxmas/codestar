@@ -1,3 +1,32 @@
+{- |
+= CodeStar.TreeSitter.Grammars — grammar specifications and build system
+
+This module is the __source of truth__ for which Tree-sitter grammars
+codestar supports.  It contains:
+
+  * 'knownGrammars' — the list of 30+ 'GrammarSpec' records, one per
+    supported language.  Each record encodes the GitHub repository, release
+    tag, C symbol name, file extensions, and whether a scanner (@.cc@) is
+    needed.
+
+  * 'grammarByExtension' — a flat 'Map' built from 'knownGrammars' for
+    fast extension → language lookup.
+
+  * The __build system__ ('fetchGrammar', 'fetchAllGrammars'): downloads a
+    grammar's source tarball from GitHub, extracts it, and compiles it to a
+    shared library using the host @cc@.  This is what @codestar-cli
+    fetch-grammars@ runs.
+
+== Grammar library format
+
+Each compiled grammar is a shared library named
+@libtree-sitter-\<language\>.dylib@ (macOS) or @.so@ (Linux).  It exports
+a single function @tree_sitter_\<symbol\>() -> TSLanguage*@ that
+Tree-sitter uses to get the language descriptor.  The grammar library does
+__not__ link against @libtree-sitter@; it contains only the language tables.
+The Tree-sitter runtime (parser, query engine) is compiled directly into the
+codestar binary.
+-}
 module CodeStar.TreeSitter.Grammars
   ( GrammarSpec (..)
   , knownGrammars
@@ -33,14 +62,24 @@ import System.Process.Typed
 -- Grammar Specification
 -- --------------------------------------------------------------------
 
+-- | Everything needed to download, compile, and load a Tree-sitter grammar.
 data GrammarSpec = GrammarSpec
-  { language :: Text
-  , githubRepo :: Text
-  , version :: Text
-  , symbol :: Text
-  , extensions :: [Text]
-  , hasScanner :: Bool
-  , subdir :: Maybe FilePath
+  { language    :: Text
+  -- ^ Language name used as the registry key (e.g. @\"haskell\"@).
+  , githubRepo  :: Text
+  -- ^ GitHub repository in @owner\/repo@ form.
+  , version     :: Text
+  -- ^ Git tag to download (e.g. @\"v0.23.1\"@).
+  , symbol      :: Text
+  -- ^ C symbol exported by the grammar library (e.g. @\"tree_sitter_haskell\"@).
+  , extensions  :: [Text]
+  -- ^ File extensions this grammar handles (e.g. @[".hs", ".lhs"]@).
+  , hasScanner  :: Bool
+  -- ^ Whether the grammar includes a hand-written scanner (@scanner.c@\/@.cc@)
+  --   that must be compiled alongside @parser.c@.
+  , subdir      :: Maybe FilePath
+  -- ^ Subdirectory inside the tarball root where @src\/parser.c@ lives,
+  --   for multi-grammar repos (e.g. @tree-sitter-typescript@).
   }
   deriving stock (Show)
 
@@ -64,6 +103,11 @@ specSub lang repo ver sym exts scanner sub =
 -- Known Grammars (30+ languages)
 -- --------------------------------------------------------------------
 
+-- | The full list of grammars codestar knows about.
+-- This list drives both 'loadGrammarRegistry' (which loads installed grammars)
+-- and @fetch-grammars@ (which downloads and compiles missing ones).
+-- Adding a new language requires adding an entry here and, if it needs
+-- a dedicated query, adding a @.scm@ file and a language-specific extractor.
 knownGrammars :: [GrammarSpec]
 knownGrammars =
   [ spec "python" "tree-sitter/tree-sitter-python" "v0.23.6" "tree_sitter_python" [".py", ".pyi"] True
@@ -97,6 +141,8 @@ knownGrammars =
   , spec "r" "r-lib/tree-sitter-r" "v1.1.0" "tree_sitter_r" [".r", ".R"] True
   ]
 
+-- | Flat map from file extension (or filename) to 'GrammarSpec'.
+-- Built from 'knownGrammars'; used by 'CodeStar.TreeSitter.languageForFile'.
 grammarByExtension :: Map Text GrammarSpec
 grammarByExtension =
   Map.fromList
@@ -109,9 +155,13 @@ grammarByExtension =
 -- Paths
 -- --------------------------------------------------------------------
 
+-- | The directory where grammar shared libraries are stored.
+-- Delegates to 'CodeStar.Config.Paths.grammarsDir' (an XDG data directory).
 grammarsDir :: IO FilePath
 grammarsDir = Paths.grammarsDir
 
+-- | Full path to the compiled grammar shared library for a given grammar.
+-- Uses @.dylib@ on macOS and @.so@ on other platforms.
 grammarLibPath :: FilePath -> GrammarSpec -> FilePath
 grammarLibPath dir grammar =
   dir </> "libtree-sitter-" <> Text.unpack grammar.language <> libExt
@@ -124,6 +174,8 @@ grammarLibPath dir grammar =
 -- Fetch and Compile
 -- --------------------------------------------------------------------
 
+-- | Download and compile a grammar if its library does not already exist.
+-- Returns @Right ()@ immediately if the library file is already present.
 fetchGrammar :: FilePath -> GrammarSpec -> IO (Either Text ())
 fetchGrammar dir grammar = do
   let libPath = grammarLibPath dir grammar
@@ -220,6 +272,10 @@ compileGrammar dir grammar srcBase = do
 -- Fetch All
 -- --------------------------------------------------------------------
 
+-- | Fetch (or skip if already installed) every grammar in 'knownGrammars'.
+-- @onProgress@ is called with the language name before each grammar so
+-- the CLI can show a progress indicator.  Returns a list of results, one
+-- per grammar, so the caller can report failures without aborting early.
 fetchAllGrammars :: FilePath -> (Text -> IO ()) -> IO [(GrammarSpec, Either Text ())]
 fetchAllGrammars dir onProgress = do
   createDirectoryIfMissing True dir

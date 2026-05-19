@@ -1,3 +1,15 @@
+{- |
+= Tools.Git — git information tool
+
+Exposes the @git@ tool that runs a limited set of read-only @git@ commands
+(status, log, diff …) to give the agent awareness of the repository's
+current state — what files have changed, what commits exist, what branch
+is checked out.
+
+Write operations (commit, push, branch creation) are intentionally
+excluded; the agent can use the @bash@ tool for those when explicitly
+asked.  This tool is 'ReadOnly' risk-tier.
+-}
 module CodeStar.Tools.Git
   ( gitToolHandler
   ) where

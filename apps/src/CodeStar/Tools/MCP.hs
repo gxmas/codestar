@@ -1,3 +1,24 @@
+{- |
+= Tools.MCP — Model Context Protocol client integration
+
+Connects to external __MCP servers__ and registers their tools into the
+agent's 'ToolRegistry'.  MCP (Model Context Protocol) is an open standard
+that lets any process expose tools, resources, and prompts to an AI agent
+over a standardised protocol.
+
+This module connects to each configured MCP endpoint at session startup,
+discovers the tools it exposes via @tools\/list@, and wraps each tool as
+a 'ToolHandlerDict' that the agent can invoke just like any built-in tool.
+
+== Transports
+
+Both transport modes defined in the MCP spec are supported:
+
+  * __Stdio__: the MCP server is a subprocess; communication goes over
+    its stdin\/stdout pipes.  Suitable for local tools.
+  * __HTTP (Streamable)__: the MCP server is a remote HTTP endpoint.
+    Supports OAuth 2.0 with PKCE for authenticated endpoints.
+-}
 module CodeStar.Tools.MCP
   ( connectMcpEndpoints
   ) where

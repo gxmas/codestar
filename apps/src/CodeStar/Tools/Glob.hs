@@ -1,3 +1,12 @@
+{- |
+= Tools.Glob — file glob tool
+
+Exposes the @glob@ tool that finds files matching a glob pattern in the
+workspace.  Results are filtered to the workspace root so the agent
+cannot accidentally enumerate files outside the project.
+
+This is a 'ReadOnly' risk-tier tool — it does not modify any files.
+-}
 module CodeStar.Tools.Glob
   ( globToolHandler
   ) where

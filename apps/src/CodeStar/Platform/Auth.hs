@@ -1,3 +1,28 @@
+{- |
+= CodeStar.Platform.Auth — authentication and identity
+
+This module defines the __authentication boundary__ of the server.  Every
+incoming WebSocket connection is validated here before any agent code runs.
+
+== Auth modes
+
+  * __NoAuthConfig__: every connection gets the anonymous identity.
+    Suitable for local CLI use and development.
+  * __ApiKeyConfig__: the caller supplies a validation function
+    (@Text -> Bool@).  Useful for simple shared-secret deployments.
+  * __JwtConfig__: the caller supplies a full validation function
+    (@Text -> IO AuthResult@), typically built from 'Auth.Jwt.validateToken'.
+    Suitable for multi-tenant production deployments.
+
+The mode is selected at startup from the TOML config and never changes,
+which means 'authenticate' is a pure dispatch with no hidden state.
+
+== Identity
+
+'Identity' is the result of a successful authentication.  It carries the
+@userId@, @orgId@, and @roles@ that the rest of the system uses for
+multi-tenancy, rate limiting, and permission checks.
+-}
 module CodeStar.Platform.Auth
   ( -- * Identity
     Identity (..)
@@ -23,10 +48,13 @@ import CodeStar.Types (OrgId (..), UserId (..))
 -- Identity
 -- --------------------------------------------------------------------
 
+-- | The authenticated identity of a connected client.
+-- Passed through the request handling pipeline and attached to every
+-- session and telemetry span.
 data Identity = Identity
-  { userId :: !UserId
-  , orgId :: !OrgId
-  , roles :: ![Text]
+  { userId :: !UserId    -- ^ Unique user identifier.
+  , orgId  :: !OrgId     -- ^ Organisation the user belongs to.
+  , roles  :: ![Text]    -- ^ Role list for future authorisation checks.
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
@@ -35,10 +63,15 @@ data Identity = Identity
 -- Auth config
 -- --------------------------------------------------------------------
 
+-- | Selects the authentication strategy for an incoming connection.
 data AuthConfig
   = NoAuthConfig
+  -- ^ No authentication — accept all connections with the anonymous identity.
   | ApiKeyConfig !(Text -> Bool)
+  -- ^ Validate the Bearer token with the supplied predicate.
   | JwtConfig !(Text -> IO AuthResult)
+  -- ^ Validate the Bearer token as a JWT using the supplied IO action.
+  --   Build this with 'Auth.Jwt.validateToken'.
 
 data AuthResult
   = Authenticated !Identity
@@ -75,6 +108,8 @@ noAuth = pure (Authenticated anonymousIdentity)
 -- Helpers
 -- --------------------------------------------------------------------
 
+-- | Extract the token string from an @Authorization: Bearer <token>@ header.
+-- Returns 'Nothing' if the header is absent, malformed, or the token is empty.
 extractBearer :: Text -> Maybe Text
 extractBearer header =
   let prefix = "Bearer "

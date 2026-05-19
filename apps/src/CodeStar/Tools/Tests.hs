@@ -1,3 +1,16 @@
+{- |
+= Tools.Tests — test runner tool
+
+Exposes the @run_tests@ tool that executes the project's test suite and
+returns a structured summary (pass\/fail counts, failing test names).
+
+The agent uses this as part of its verification loop: after making code
+changes it runs the tests to confirm nothing regressed, and uses the
+failure output to guide further edits.
+
+This is a 'SideEffect' risk-tier tool because test runners can have
+arbitrary side effects (network calls, file system changes, processes).
+-}
 module CodeStar.Tools.Tests
   ( testsToolHandler
   ) where

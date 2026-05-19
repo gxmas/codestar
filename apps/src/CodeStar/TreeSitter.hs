@@ -1,3 +1,28 @@
+{- |
+= CodeStar.TreeSitter — Tree-sitter grammar registry and syntax validation
+
+This module is the __integration point__ between codestar and the
+Tree-sitter parsing library.  It provides:
+
+  * __'GrammarRegistry'__: an in-memory map from language name to a loaded
+    'Language' object.  Built at startup by 'loadGrammarRegistry' by
+    scanning the grammars directory for compiled @.dylib@\/@.so@ files.
+
+  * __Language detection__: 'languageForFile' maps file paths to language
+    names via the extension table in 'Grammars'.
+
+  * __Syntax validation__: 'validate' and 'validateWithTimeout' parse a
+    source file and report whether the parse tree contains any error nodes.
+    Used by the verification subsystem to check edits before committing them.
+
+== Grammar loading
+
+Each grammar is a compiled shared library (@libtree-sitter-<lang>.dylib@)
+that exports a single @tree_sitter_<lang>@ function returning a
+@TSLanguage*@.  'loadGrammarRegistry' calls 'TreeSitter.loadLanguage' on
+each known grammar file that exists on disk, silently skipping missing ones
+so the agent works with a partial grammar set.
+-}
 module CodeStar.TreeSitter
   ( -- * Types
     SyntaxResult (..)
@@ -66,6 +91,8 @@ data ParseError
 -- Grammar Registry
 -- --------------------------------------------------------------------
 
+-- | A map from language name (e.g. @\"haskell\"@) to a loaded Tree-sitter
+-- 'Language' object.  Constructed at startup; read-only thereafter.
 newtype GrammarRegistry = GrammarRegistry (Map Text Language)
 
 {- | Load all available grammar dylibs from the grammars directory.
@@ -90,9 +117,13 @@ tryLoad dir grammar = do
         Nothing -> Nothing
         Just lang -> Just (grammar.language, lang)
 
+-- | Look up a 'Language' by name.  Returns 'Nothing' if the grammar was
+-- not installed or failed to load.
 lookupLanguage :: GrammarRegistry -> Text -> Maybe Language
 lookupLanguage (GrammarRegistry m) lang = Map.lookup lang m
 
+-- | Number of successfully loaded grammars.
+-- Used by the diagnostics subsystem to warn when the count is unexpectedly low.
 grammarCount :: GrammarRegistry -> Int
 grammarCount (GrammarRegistry m) = Map.size m
 
@@ -112,6 +143,9 @@ languageForFile path =
 -- Validation
 -- --------------------------------------------------------------------
 
+-- | Parse @src@ with the given 'Language' and return whether the parse
+-- tree is error-free.  Does not time out — use 'validateWithTimeout' for
+-- untrusted or very large inputs.
 validate :: Language -> ByteString -> IO (Either ParseError SyntaxResult)
 validate lang src = do
   parser <- TreeSitter.newParser

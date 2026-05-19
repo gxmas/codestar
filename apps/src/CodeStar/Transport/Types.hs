@@ -1,5 +1,34 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
+{- |
+= CodeStar.Transport.Types — wire protocol types
+
+This module defines the __bidirectional protocol__ between the agent
+server and its clients (IDE extensions, web frontends, CLI client).
+
+== Direction
+
+@
+  Client ──── Command ──────────────────────────► Server
+  Client ◄─── AgentEventEnvelope (notification) ─ Server
+@
+
+  * __Commands__ (@CmdStart@, @CmdRespond@, @CmdApprove@, …) are
+    client-initiated requests that drive the session state machine.
+    Each command carries a @sessionId@ so the server can route it to
+    the correct agent thread.
+  * __Events__ ('AgentEventEnvelope') are server-initiated notifications
+    pushed to the client as the agent works.  They are tagged with a
+    @sessionId@ to support multiplexing multiple sessions over one
+    WebSocket connection.
+
+== Orphan instances
+
+'ToJSON'\/'FromJSON' instances for 'AgentEvent' and 'ApprovalDecision'
+are defined here (orphans relative to "AgentLoop") because they depend on
+transport-level decisions about the wire format that the core library
+should not know about.
+-}
 module CodeStar.Transport.Types
   ( -- * Transport handle
     AgentTransportDict (..)
@@ -33,10 +62,14 @@ import Data.Aeson.Types (Parser)
 -- Commands (client → server)
 -- --------------------------------------------------------------------
 
+-- | Commands sent from the client to the server to drive a session.
+-- Every command carries a @sessionId@ for routing.
 data Command
   = CmdStart
       { sessionId :: !SessionId
+      -- ^ The session to create (must be unique per client connection).
       , task :: !Text
+      -- ^ The initial task description; starts the agent turn.
       }
   | CmdRespond
       { sessionId :: !SessionId

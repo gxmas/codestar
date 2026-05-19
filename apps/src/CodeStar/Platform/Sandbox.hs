@@ -1,3 +1,27 @@
+{- |
+= Platform.Sandbox — shell command execution environment
+
+The 'Sandbox' type abstracts __where and how__ shell commands are run when
+the agent calls the @shell@ tool.
+
+== Two implementations
+
+  * __'noSandbox'__: runs commands directly on the host using @sh -c@,
+    cwd set to the workspace.  Used in the CLI and for trusted local
+    sessions where isolation is not required.
+
+  * __'dockerSandbox'__: starts a Docker container with the workspace
+    mounted read-write, CPU/memory/network limits applied, and runs
+    commands via @docker exec@.  Provides process, filesystem, and network
+    isolation for multi-tenant or untrusted workloads.
+
+== Design: record-of-functions
+
+'Sandbox' is a record of IO actions rather than a type class.  This keeps
+the agent loop free of type parameters and makes it trivial to build
+test doubles.  The @runCommand@ field is what the @shell@ tool calls;
+@copyIn@\/@copyOut@ and @teardown@ are lifecycle management.
+-}
 module CodeStar.Platform.Sandbox
   ( -- * Config
     SandboxConfig (..)
@@ -51,17 +75,26 @@ defaultSandboxConfig workspace =
 -- Handle
 -- --------------------------------------------------------------------
 
+-- | A handle to a command execution environment.
 data Sandbox = Sandbox
   { runCommand :: Text -> IO (Either Text Text)
-  , copyIn :: FilePath -> FilePath -> IO ()
+  -- ^ Execute a shell command.  Returns @Right ""@ on success or
+  --   @Left errorMsg@ on non-zero exit.
+  , copyIn  :: FilePath -> FilePath -> IO ()
+  -- ^ Copy a file from the host into the sandbox environment.
   , copyOut :: FilePath -> FilePath -> IO ()
+  -- ^ Copy a file out of the sandbox to the host.
   , teardown :: IO ()
+  -- ^ Tear down the sandbox (stop container, release resources).
   }
 
 -- --------------------------------------------------------------------
 -- No-op (host) sandbox
 -- --------------------------------------------------------------------
 
+-- | Create a sandbox that runs commands directly on the host.
+-- @workspace@ is set as the working directory for every command.
+-- @copyIn@\/@copyOut@ and @teardown@ are no-ops.
 noSandbox :: FilePath -> Sandbox
 noSandbox workspace =
   Sandbox

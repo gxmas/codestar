@@ -1,3 +1,15 @@
+{- |
+= Tools.Read — file reading tool
+
+Exposes the @read_file@ tool that the agent uses to read source files.
+The tool returns file contents with line numbers so the agent can
+reference specific lines in subsequent edits.
+
+The 'ReadTracker' records which files have been read in the current
+session.  The edit tool uses this to enforce that a file must be read
+before it can be edited — preventing the agent from blindly overwriting
+a file it has not seen.
+-}
 module CodeStar.Tools.Read
   ( readToolHandler
   , ReadTracker

@@ -1,3 +1,30 @@
+{- |
+= CodeStar.LLM.Anthropic — Anthropic Claude adapter
+
+Translates between the provider-agnostic 'LlmClientDict' interface and
+the Anthropic Messages API (@anthropic-client@ SDK).
+
+== Prompt caching
+
+Anthropic supports __prompt caching__: marking a prefix of the context
+as cacheable so the API charges a reduced rate for repeated requests with
+the same prefix.  Cache breakpoints are injected into the conversation as
+sentinel 'TextContent' blocks containing 'cacheMarkerText' (@\NULcache_control@).
+
+'translateBlocks' consumes these markers and attaches @cache_control:
+ephemeral@ to the block that immediately follows each marker.  Trailing
+markers with no following block are silently dropped.
+
+This design keeps the caching logic inside the adapter and invisible to
+the rest of the codebase — the agent loop just inserts sentinel strings
+at the right positions in the message list.
+
+== Error mapping
+
+Provider-specific error codes (rate limit, auth, overload …) are mapped
+to the shared 'LlmError' type so the retry and guardrail layers do not
+need to know which provider is in use.
+-}
 module CodeStar.LLM.Anthropic
   ( newAnthropicClient
 
@@ -21,6 +48,9 @@ import Anthropic.Types qualified as AT
 
 import CodeStar.LLM.Base
 
+-- | Create a new 'LlmClientDict' backed by the Anthropic Messages API.
+-- @apiKey@ is the @ANTHROPIC_API_KEY@ value; @modelId@ is e.g.
+-- @"claude-sonnet-4-20250514"@.
 newAnthropicClient :: Text -> Text -> IO LlmClientDict
 newAnthropicClient apiKey modelId = do
   client <- A.newClient (AC.defaultConfig (AT.ApiKey apiKey))
@@ -154,6 +184,10 @@ isCacheMarker :: Content -> Bool
 isCacheMarker (TextContent t) = t == cacheMarkerText
 isCacheMarker _ = False
 
+-- | Sentinel string inserted into a 'TextContent' block to mark a prompt
+-- cache breakpoint.  The NUL prefix makes it unlikely to appear in real
+-- content.  'translateBlocks' consumes this marker and applies
+-- @cache_control: ephemeral@ to the next real content block.
 cacheMarkerText :: Text
 cacheMarkerText = "\x0000cache_control"
 

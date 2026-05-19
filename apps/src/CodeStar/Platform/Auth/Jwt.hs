@@ -1,3 +1,27 @@
+{- |
+= Platform.Auth.Jwt — JWT validation
+
+Validates JSON Web Tokens (JWTs) against the keys in a 'JwksCache'.
+
+== Validation steps
+
+1. __Split__: split the token into header, payload, and signature parts at @.@ boundaries.
+2. __Decode__: base64url-decode each part.
+3. __Parse__: JSON-decode the header (for @alg@) and payload (for claims).
+4. __Verify signature__:
+   - @HS256@: HMAC-SHA256 the @header.payload@ string and constant-time
+     compare to the decoded signature.
+   - @RS256@: PKCS#1 v1.5 verify the @header.payload@ string against each
+     RSA public key from the cache.
+5. __Validate claims__: check @exp@ (expiry), @iss@ (issuer), and @aud@
+   (audience) against the values configured in 'JwtAuthConfig'.
+6. __Extract identity__: map claim fields to 'Identity'.
+
+== Constant-time comparison
+
+HMAC signatures are compared with 'BA.constEq' to prevent timing attacks
+that could allow an attacker to forge tokens by measuring response times.
+-}
 module CodeStar.Platform.Auth.Jwt
   ( JwtValidator (..)
   , newJwtValidator
@@ -30,9 +54,13 @@ data JwtValidator = JwtValidator
   , config    :: !JwtAuthConfig
   }
 
+-- | Construct a 'JwtValidator' from a key cache and claim config.
 newJwtValidator :: JwksCache -> JwtAuthConfig -> JwtValidator
 newJwtValidator = JwtValidator
 
+-- | Validate a raw JWT string (without the @Bearer@ prefix).
+-- Returns 'Authenticated identity' on success or 'Unauthenticated reason'
+-- on any validation failure.
 validateToken :: JwtValidator -> Text -> IO AuthResult
 validateToken v token = do
   case splitJwt (TE.encodeUtf8 token) of

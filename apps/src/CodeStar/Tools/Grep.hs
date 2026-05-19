@@ -1,3 +1,12 @@
+{- |
+= Tools.Grep — content search tool
+
+Exposes the @grep@ tool that searches file contents for a pattern using
+the system @grep@ command.  The agent uses this to locate symbols,
+identifiers, or text across the workspace without reading every file.
+
+This is a 'ReadOnly' risk-tier tool.
+-}
 module CodeStar.Tools.Grep
   ( grepToolHandler
   ) where

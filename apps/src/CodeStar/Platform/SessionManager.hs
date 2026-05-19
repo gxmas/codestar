@@ -1,3 +1,40 @@
+{- |
+= Platform.SessionManager — agent session lifecycle
+
+The 'SessionManager' creates, tracks, and destroys agent sessions on the
+server.  Each session corresponds to one active agent thread, identified
+by a 'SessionId'.
+
+== Session state machine
+
+@
+  SActive
+     │
+     ├─► SWaitingForInput   ◄─── CmdRespond ──► SActive
+     │
+     └─► SWaitingForApproval ◄── CmdApprove/CmdReject ──► SActive
+                                                     │
+                                                     └─► STerminated
+  SActive ──► SCompleted ControlSignal
+  SActive ──► STerminated (on error or destroy)
+@
+
+== Concurrency model
+
+  * The session list is stored in an 'IORef' updated atomically.
+  * Each session's @status@, @lastActiveAt@, @workerThread@, and
+    @pendingModel@ are 'TVar's updated in STM transactions.
+  * @inputMVar@ and @approvalMVar@ are @MVar@s that the agent thread
+    blocks on when waiting for user input or tool approval.
+    'respondToSession' and 'approveSession' unblock the agent by
+    writing to the appropriate @MVar@.
+
+== Inactivity reaping
+
+'SessionManager.reap' scans for sessions whose @lastActiveAt@ is older
+than @inactivityTimeout@ seconds and destroys them.  Callers are expected
+to call this periodically (e.g. every 60 seconds).
+-}
 module CodeStar.Platform.SessionManager
   ( -- * Session
     Session (..)
@@ -47,17 +84,31 @@ data SessionStatus
   | STerminated
   deriving stock (Eq, Show)
 
+-- | A live agent session.  All mutable fields use STM or MVar so they
+-- can be read and written safely across threads.
 data Session = Session
-  { sessionId :: !SessionId
-  , userId :: !UserId
-  , status :: !(TVar SessionStatus)
-  , createdAt :: !UTCTime
-  , lastActiveAt :: !(TVar UTCTime)
-  , workerThread :: !(TVar (Maybe (Async ())))
-  , inputMVar :: !(MVar Text)
-  , approvalMVar :: !(MVar ApprovalDecision)
-  , eventSink :: !(AgentEventEnvelope -> IO ())
-  , pendingModel :: !(TVar (Maybe (Text, LlmClientDict)))
+  { sessionId     :: !SessionId
+  -- ^ Unique session identifier, scoped to this server instance.
+  , userId        :: !UserId
+  -- ^ The user who owns this session.
+  , status        :: !(TVar SessionStatus)
+  -- ^ Current status; written by the agent thread, read by the server.
+  , createdAt     :: !UTCTime
+  -- ^ Wall-clock creation time (immutable).
+  , lastActiveAt  :: !(TVar UTCTime)
+  -- ^ Updated on every command; used for inactivity reaping.
+  , workerThread  :: !(TVar (Maybe (Async ())))
+  -- ^ The agent's background thread; cancelled on session destroy.
+  , inputMVar     :: !(MVar Text)
+  -- ^ Unblocked by 'respondToSession' when the agent is waiting for input.
+  , approvalMVar  :: !(MVar ApprovalDecision)
+  -- ^ Unblocked by 'approveSession'\/'rejectSession' when the agent
+  --   is waiting for tool-call approval.
+  , eventSink     :: !(AgentEventEnvelope -> IO ())
+  -- ^ Called by the agent to send events back to the client.
+  , pendingModel  :: !(TVar (Maybe (Text, LlmClientDict)))
+  -- ^ Non-Nothing when 'CmdSetModel' was received; consumed by the agent
+  --   at the next turn boundary to hot-swap the LLM client.
   }
 
 -- --------------------------------------------------------------------
@@ -83,13 +134,22 @@ defaultSessionConfig =
 
 type SessionMap = Map SessionId Session
 
+-- | The session manager interface as a record of functions.
+-- Construct with 'newSessionManager'; the backing store is an in-memory map.
 data SessionManager = SessionManager
-  { create :: UserId -> (AgentEventEnvelope -> IO ()) -> IO (Either Text Session)
-  , get :: SessionId -> IO (Maybe Session)
-  , destroy :: SessionId -> IO ()
-  , list :: UserId -> IO [Session]
-  , reap :: IO ()
+  { create      :: UserId -> (AgentEventEnvelope -> IO ()) -> IO (Either Text Session)
+  -- ^ Allocate a new session for @userId@.  Returns @Left err@ if the
+  --   per-user concurrent session limit is reached.
+  , get         :: SessionId -> IO (Maybe Session)
+  -- ^ Look up a session by ID.  Returns 'Nothing' if not found or already destroyed.
+  , destroy     :: SessionId -> IO ()
+  -- ^ Cancel the agent thread and remove the session from the map.
+  , list        :: UserId -> IO [Session]
+  -- ^ List active (non-terminated) sessions for a user.
+  , reap        :: IO ()
+  -- ^ Destroy sessions that have been inactive longer than 'inactivityTimeout'.
   , shutdownAll :: IO ()
+  -- ^ Destroy every session in the manager (called on server shutdown).
   }
 
 newSessionManager :: SessionConfig -> IO SessionManager
