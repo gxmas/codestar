@@ -28,6 +28,7 @@ import CodeStar.RepoMap.Graph.Extract.Types
   ( Tag (..)
   , TagExtraction (..)
   , TagKind (..)
+  , namedChildren
   , wordAt
   )
 import CodeStar.TreeSitter (GrammarRegistry, languageForFile, lookupLanguage)
@@ -213,27 +214,6 @@ walkGenericNode srcLines path = go 0
                     else pure []
                 childTags <- concat <$> mapM (go (depth + 1)) children
                 pure (ownTags ++ childTags)
-
-namedChildren :: Node -> Word32 -> IO [Node]
-namedChildren node count = do
-  -- Avoid unsigned-underflow range bugs: when count == 0, [0 .. count - 1]
-  -- would expand to a massive list ([0 .. maxBound]) and appear to hang.
-  if count == 0
-    then pure []
-    else filterNamedM 0
- where
-  filterNamedM i
-    | i >= count = pure []
-    | otherwise = do
-        child <- TS.nodeChild node i
-        isNull <- TS.nodeIsNull child
-        if isNull
-          then filterNamedM (i + 1)
-          else do
-            isNamed <- TS.nodeIsNamed child
-            if isNamed
-              then (child :) <$> filterNamedM (i + 1)
-              else filterNamedM (i + 1)
 
 tryExtractAsDefinition :: V.Vector Text -> FilePath -> Node -> IO [Tag]
 tryExtractAsDefinition srcLines path node = do

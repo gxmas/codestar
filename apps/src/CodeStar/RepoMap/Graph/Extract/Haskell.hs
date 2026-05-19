@@ -17,7 +17,7 @@ import TreeSitter (Node)
 import TreeSitter qualified as TS
 import TreeSitter.Query (Query, QueryCapture (..), queryCaptures)
 
-import CodeStar.RepoMap.Graph.Extract.Types (Tag (..), TagKind (..), wordAt)
+import CodeStar.RepoMap.Graph.Extract.Types (Tag (..), TagKind (..), namedChildren, wordAt)
 
 haskellDefinitionQueryFile :: FilePath
 haskellDefinitionQueryFile = "haskell-definitions.scm"
@@ -110,25 +110,6 @@ mkHaskellDefinitionTag srcLines path node = do
     , isTopLevel
     , not (name `Set.member` haskellNoiseNames)
     ]
-
-namedChildren :: Node -> Word32 -> IO [Node]
-namedChildren node count = do
-  if count == 0
-    then pure []
-    else filterNamedM 0
- where
-  filterNamedM i
-    | i >= count = pure []
-    | otherwise = do
-        child <- TS.nodeChild node i
-        isNull <- TS.nodeIsNull child
-        if isNull
-          then filterNamedM (i + 1)
-          else do
-            isNamed <- TS.nodeIsNamed child
-            if isNamed
-              then (child :) <$> filterNamedM (i + 1)
-              else filterNamedM (i + 1)
 
 -- Leaf node types that carry an identifier name.
 identifierTypes :: Set Text
